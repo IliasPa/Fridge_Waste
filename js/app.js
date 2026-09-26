@@ -11,7 +11,7 @@ import { startScanner, stopScanner, lookupOFF, scanPhoto, cameraProblem, liveCam
 import { recognizeDate } from './ocr.js';
 import { ICONS } from './icons.js';
 
-const APP_VERSION = '0.2';
+const APP_VERSION = '0.1.1';
 
 /* ======================================================================
    State

@@ -2,7 +2,7 @@
 
 This file lists the changes in each version, newest first.
 
-## v0.2 — 2026-09-27
+## v0.1.1 — 2026-09-27
 
 ### Added
 
