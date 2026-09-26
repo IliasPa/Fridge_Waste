@@ -20,6 +20,7 @@ export const ICONS = {
   chart: svg('<path d="M3 3v18h18M8 16v-5M13 16V7M18 16v-8"/>'),
   left: svg('<path d="m15 18-6-6 6-6"/>'),
   right: svg('<path d="m9 18 6-6-6-6"/>'),
+  bell: svg('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>'),
   calendar: svg('<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>'),
   download: svg('<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>'),
   upload: svg('<path d="M12 15V3M7 8l5-5 5 5M5 21h14"/>'),

@@ -9,9 +9,10 @@ import { cat, pickById, homeLocation, defaultExpiry, openedExpiry, movedExpiry }
 import { buildICS } from './ics.js';
 import { startScanner, stopScanner, lookupOFF, scanPhoto, cameraProblem, liveCameraSupported } from './scanner.js';
 import { recognizeDate } from './ocr.js';
+import { notifyPermission, requestPermission, showNotification, setBackgroundCheck } from './notify.js';
 import { ICONS } from './icons.js';
 
-const APP_VERSION = '0.1.1';
+const APP_VERSION = '0.2';
 
 /* ======================================================================
    State
@@ -23,6 +24,8 @@ const DEFAULT_SETTINGS = {
   remindBefore: '1',      // '1' | '2' | '12'
   lastBackup: null,       // ISO date string
   lastIcsExport: 0,       // timestamp; items added after it count as "new"
+  notify: false,          // notifications the day before food expires
+  notifyBg: false,        // Android background check is set up
 };
 
 const state = {
@@ -307,7 +310,7 @@ function itemCard(it) {
     <div class="item-actions">
       <button data-act="ate" class="act-ate">${icon('check')}<span>${t('ateIt')}</span></button>
       <button data-act="wasted" class="act-waste">${icon('trash')}<span>${t('threwOut')}</span></button>
-      <button data-act="open" ${it.openedAt ? 'disabled' : ''}>${icon('open')}<span>${openLabel}</span></button>
+      <button data-act="open" class="${it.openedAt ? 'on' : ''}" aria-pressed="${!!it.openedAt}">${icon('open')}<span>${openLabel}</span></button>
       <button data-act="move">${icon('move')}<span>${t('move')}</span></button>
     </div>
   </article>`;
@@ -342,14 +345,23 @@ async function finishItem(id, outcome) {
   ]);
 }
 
-async function markOpened(id) {
+/* "Opened" is a toggle, so a tap by mistake can be taken back any time:
+   the date from before opening is kept and restored. */
+async function toggleOpened(id) {
   const it = state.items.find((x) => x.id === id);
-  if (!it || it.openedAt) return;
+  if (!it) return;
   const before = { ...it };
-  const newDate = openedExpiry(it);
-  await saveItem({ ...it, openedAt: todayStr(), expiresAt: newDate });
+  let msg;
+  if (it.openedAt) {
+    const restored = it.expiresBeforeOpen || it.expiresAt;
+    await saveItem({ ...it, openedAt: null, expiresBeforeOpen: null, expiresAt: restored });
+    msg = t('unopenedToast', { date: formatDate(restored, getLang()) });
+  } else {
+    const newDate = openedExpiry(it);
+    await saveItem({ ...it, openedAt: todayStr(), expiresBeforeOpen: it.expiresAt, expiresAt: newDate });
+    msg = newDate !== before.expiresAt ? t('openedToast', { date: formatDate(newDate, getLang()) }) : t('openedNoChange');
+  }
   refresh();
-  const msg = newDate !== before.expiresAt ? t('openedToast', { date: formatDate(newDate, getLang()) }) : t('openedNoChange');
   toast(msg, [{ label: t('undo'), run: async () => { await saveItem(before); refresh(); } }]);
 }
 
@@ -370,7 +382,8 @@ function openMoveSheet(id) {
           const to = b.dataset.to;
           const before = { ...it };
           const newDate = movedExpiry(it, to);
-          await saveItem({ ...it, location: to, expiresAt: newDate });
+          // The date from before opening no longer applies after a move.
+          await saveItem({ ...it, location: to, expiresAt: newDate, expiresBeforeOpen: null });
           refresh();
           const msg = newDate !== before.expiresAt
             ? t('movedToast', { loc: t(to), date: formatDate(newDate, getLang()) })
@@ -506,6 +519,7 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
     qty: init.qty || 1,
     price: init.price ?? '',
     openedAt: init.openedAt || null,
+    expiresBeforeOpen: init.expiresBeforeOpen || null,
     status: 'active',
     addedAt: init.addedAt || today,
     addedTs: init.addedTs || Date.now(),
@@ -607,6 +621,7 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
           if (editing && to !== draft.location) {
             // Editing: apply the same rule as the Move button.
             draft.expiresAt = movedExpiry({ ...draft }, to);
+            draft.expiresBeforeOpen = null;
             paintDate();
           }
           draft.location = to;
@@ -614,13 +629,13 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
           recompute();
         };
       });
-      f.expiresAt.onchange = () => { if (f.expiresAt.value) { draft.expiresAt = f.expiresAt.value; dateTouched = true; paintDate(); } };
+      // A date you set yourself wins over the one from before opening.
+      const setDate = (date) => { draft.expiresAt = date; draft.expiresBeforeOpen = null; dateTouched = true; paintDate(); };
+      f.expiresAt.onchange = () => { if (f.expiresAt.value) setDate(f.expiresAt.value); };
       $$('[data-add]', body).forEach((b) => {
         b.onclick = () => {
           const n = +b.dataset.add;
-          draft.expiresAt = b.dataset.unit === 'm' ? addMonths(today, n) : addDays(today, n);
-          dateTouched = true;
-          paintDate();
+          setDate(b.dataset.unit === 'm' ? addMonths(today, n) : addDays(today, n));
         };
       });
       $$('[data-step]', body).forEach((b) => {
@@ -631,10 +646,14 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
           const want = b.dataset.opened === '1';
           if (want && !draft.openedAt) {
             draft.openedAt = today;
+            draft.expiresBeforeOpen = draft.expiresAt;
             draft.expiresAt = openedExpiry({ ...draft });
             paintDate();
-          } else if (!want) {
+          } else if (!want && draft.openedAt) {
             draft.openedAt = null;
+            if (draft.expiresBeforeOpen) draft.expiresAt = draft.expiresBeforeOpen;
+            draft.expiresBeforeOpen = null;
+            paintDate();
           }
           paintOpened();
         };
@@ -645,7 +664,7 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
       $('#fOcrFile', body).onchange = (e) => {
         const file = e.target.files[0];
         e.target.value = '';
-        if (file) openOcrSheet(file, (date) => { draft.expiresAt = date; dateTouched = true; paintDate(); });
+        if (file) openOcrSheet(file, setDate);
       };
 
       if (editing) {
@@ -1129,6 +1148,8 @@ function renderMore(view) {
   view.innerHTML = `
     ${statsCard()}
 
+    ${notifyCard()}
+
     <section class="card">
       <h3>${icon('calendar')} ${t('reminders')}</h3>
       <p class="muted small">${t('remindersText')}</p>
@@ -1179,6 +1200,83 @@ function renderMore(view) {
   $('#sBefore').value = st.remindBefore;
   $('#sTime').onchange = (e) => saveSettings({ remindTime: e.target.value || '09:00' });
   $('#sBefore').onchange = (e) => saveSettings({ remindBefore: e.target.value });
+}
+
+/* ---------- Notifications (see notify.js for what's possible without a server) ---------- */
+
+function notifyCard() {
+  const perm = notifyPermission();
+  const on = state.settings.notify && perm === 'granted';
+  let content;
+  if (perm === 'unsupported') content = `<p class="note">${t('notifyUnsupported')}</p>`;
+  else if (perm === 'install') content = `<p class="note">${t('notifyInstall')}</p>`;
+  else if (perm === 'denied') content = `<p class="note warn">${t('notifyDenied')}</p>`;
+  else if (on) {
+    const how = state.settings.notifyBg ? t('notifyBgNote') : isIOS() ? t('notifyIOSNote') : t('notifyForegroundNote');
+    content = `
+      <p><strong>${t('notifyIsOn')}</strong></p>
+      <p class="muted small">${how}</p>
+      <div class="row gap">
+        <button class="btn grow" data-act="notifyTest">${t('notifyTest')}</button>
+        <button class="btn subtle" data-act="notifyOff">${t('notifyOff')}</button>
+      </div>`;
+  } else {
+    content = `<button class="btn primary" data-act="notifyOn">${icon('bell')} ${t('notifyOn')}</button>`;
+  }
+  return `
+  <section class="card">
+    <h3>${icon('bell')} ${t('notifications')}</h3>
+    <p class="muted small">${t('notifyText')}</p>
+    ${content}
+  </section>`;
+}
+
+async function turnOnNotifications() {
+  const perm = await requestPermission(); // first: needs the tap's user gesture
+  if (perm !== 'granted') { toast(t('notifyDeniedToast')); render(); return; }
+  const bg = await setBackgroundCheck(true);
+  await saveSettings({ notify: true, notifyBg: bg });
+  render();
+  updateBadge(); // the Home Screen icon badge also needs this permission on iPhone
+  await showNotification(t('notifyTestTitle'), t('notifyTestBody'), 'fridge-test').catch((err) => console.warn(err));
+  runExpiryNotifications();
+}
+
+async function turnOffNotifications() {
+  await saveSettings({ notify: false, notifyBg: false });
+  setBackgroundCheck(false);
+  render();
+}
+
+/* Notifies about food that expires tomorrow or today, once per item and
+   use-by date (so changing a date notifies again). Runs when the app opens
+   or comes back to the screen; sw.js does the same in the background. */
+let notifyRunning = false;
+async function runExpiryNotifications() {
+  if (notifyRunning || !state.settings.notify || notifyPermission() !== 'granted') return;
+  notifyRunning = true;
+  try {
+    const notified = await db.getMeta('notified', {});
+    const due = active()
+      .filter((i) => { const d = daysUntil(i.expiresAt); return d >= 0 && d <= 1 && notified[i.id] !== i.expiresAt; })
+      .sort(byExpiry);
+    if (!due.length) return;
+    const line = (label, list) => (list.length ? `${label}: ${list.map((i) => `${itemEmoji(i)} ${itemName(i)}`).join(', ')}` : '');
+    const body = [
+      line(t('today'), due.filter((i) => daysUntil(i.expiresAt) === 0)),
+      line(t('tomorrow'), due.filter((i) => daysUntil(i.expiresAt) === 1)),
+    ].filter(Boolean).join('\n');
+    await showNotification(t('notifyTitle'), body);
+    // Remember what was notified; forget items that are gone.
+    const activeIds = new Set(active().map((i) => i.id));
+    const next = Object.fromEntries(Object.entries(notified).filter(([id]) => activeIds.has(id)));
+    for (const i of due) next[i.id] = i.expiresAt;
+    await db.setMeta('notified', next);
+  } catch (err) {
+    console.warn('Notification failed', err);
+  } finally {
+    notifyRunning = false;
+  }
 }
 
 async function exportIcs(onlyNew) {
@@ -1293,7 +1391,7 @@ function bindEvents() {
       }
       if (act === 'ate') finishItem(id, 'eaten');
       if (act === 'wasted') finishItem(id, 'wasted');
-      if (act === 'open') markOpened(id);
+      if (act === 'open') toggleOpened(id);
       if (act === 'move') openMoveSheet(id);
       return;
     }
@@ -1305,6 +1403,9 @@ function bindEvents() {
       case 'addNamed': addByName(state.addQuery.trim()); break;
       case 'toggleRecipes': state.showAllRecipes = !state.showAllRecipes; render(); break;
       case 'ics': exportIcs(el.dataset.new === '1'); break;
+      case 'notifyOn': turnOnNotifications(); break;
+      case 'notifyOff': turnOffNotifications(); break;
+      case 'notifyTest': showNotification(t('notifyTestTitle'), t('notifyTestBody'), 'fridge-test').catch((err) => console.warn(err)); break;
       case 'export': exportBackup(); break;
       case 'import': $('#importFile').click(); break;
       case 'erase': eraseAll(); break;
@@ -1320,11 +1421,13 @@ function bindEvents() {
   // Dates move on at midnight: refresh when the app comes back to the foreground.
   let lastDay = todayStr();
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && todayStr() !== lastDay) {
+    if (document.visibilityState !== 'visible') return;
+    if (todayStr() !== lastDay) {
       lastDay = todayStr();
       state.statsMonth = monthKey(lastDay);
       if (!sheets.length) render(); else updateBadge();
     }
+    runExpiryNotifications();
   });
 }
 
@@ -1364,6 +1467,7 @@ async function init() {
   registerServiceWorker();
   // Ask the browser not to evict our data under storage pressure.
   navigator.storage?.persist?.().catch(() => {});
+  runExpiryNotifications();
   // Deep links from the Home Screen quick actions (manifest shortcuts).
   const tab = new URLSearchParams(location.search).get('tab');
   if (tab && ['home', 'cook', 'add', 'shop', 'more'].includes(tab)) go(tab);

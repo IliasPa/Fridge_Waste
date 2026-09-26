@@ -6,10 +6,13 @@
    - The text-reader library (Tesseract, from cdn.jsdelivr.net) and product
      photos are cached the first time they're used.
    - Open Food Facts lookups always go to the network (nothing to cache).
+   - Notifications: opens the app when one is tapped, and on Android
+     (installed app) checks about once a day in the background for food
+     that expires tomorrow (see js/notify.js).
 
    If you add or rename app files, add them to APP_FILES and bump VERSION. */
 
-const VERSION = 'v0.1.1';
+const VERSION = 'v0.2';
 const APP_CACHE = `fridge-app-${VERSION}`;
 const RUNTIME_CACHE = 'fridge-runtime';
 
@@ -23,6 +26,7 @@ const APP_FILES = [
   'js/defaults.js',
   'js/i18n.js',
   'js/icons.js',
+  'js/notify.js',
   'js/ics.js',
   'js/ocr.js',
   'js/recipes.js',
@@ -90,3 +94,80 @@ self.addEventListener('fetch', (event) => {
   }
   // Everything else (e.g. the Open Food Facts API) goes straight to the network.
 });
+
+/* ---------- Notifications ---------- */
+
+/* Tapping a notification opens (or focuses) the app. */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const open = all.find((c) => c.url.startsWith(self.registration.scope));
+    if (open) return open.focus();
+    return self.clients.openWindow((event.notification.data && event.notification.data.url) || './');
+  })());
+});
+
+/* Android (installed app): background check, about once a day. */
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'fridge-expiry-check') event.waitUntil(checkExpiring());
+});
+
+const NOTIFY_TEXT = {
+  en: { title: 'Food to use soon', today: 'Today', tomorrow: 'Tomorrow' },
+  el: { title: 'Φάτε σύντομα', today: 'Σήμερα', tomorrow: 'Αύριο' },
+};
+
+/* Opens the app's database without creating it if it doesn't exist yet. */
+function openAppDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('fridge-db');
+    req.onupgradeneeded = () => req.transaction.abort(); // no data yet
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+const idbRequest = (req) => new Promise((resolve, reject) => {
+  req.onsuccess = () => resolve(req.result);
+  req.onerror = () => reject(req.error);
+});
+
+const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/* Same rule as the app (runExpiryNotifications in js/app.js): food expiring
+   tomorrow or today, each item notified once per use-by date. */
+async function checkExpiring() {
+  let db;
+  try { db = await openAppDB(); } catch { return; }
+  try {
+    const meta = db.transaction('meta').objectStore('meta');
+    const settings = ((await idbRequest(meta.get('settings'))) || {}).value || {};
+    if (!settings.notify) return;
+    const notified = ((await idbRequest(db.transaction('meta').objectStore('meta').get('notified'))) || {}).value || {};
+    const items = (await idbRequest(db.transaction('items').objectStore('items').getAll())).filter((i) => i.status === 'active');
+
+    const now = new Date();
+    const today = localDay(now);
+    const tomorrow = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+    const due = items.filter((i) => (i.expiresAt === today || i.expiresAt === tomorrow) && notified[i.id] !== i.expiresAt);
+    if (!due.length) return;
+
+    const text = NOTIFY_TEXT[settings.lang] || NOTIFY_TEXT.en;
+    const line = (label, list) => (list.length ? `${label}: ${list.map((i) => i.name).join(', ')}` : '');
+    const body = [
+      line(text.today, due.filter((i) => i.expiresAt === today)),
+      line(text.tomorrow, due.filter((i) => i.expiresAt === tomorrow)),
+    ].filter(Boolean).join('\n');
+    const icon = new URL('icons/icon-192.png', self.registration.scope).href;
+    await self.registration.showNotification(text.title, { body, tag: 'fridge-expiry', icon, badge: icon, data: { url: self.registration.scope } });
+
+    const activeIds = new Set(items.map((i) => i.id));
+    const next = {};
+    for (const [id, date] of Object.entries(notified)) if (activeIds.has(id)) next[id] = date;
+    for (const i of due) next[i.id] = i.expiresAt;
+    await idbRequest(db.transaction('meta', 'readwrite').objectStore('meta').put({ key: 'notified', value: next }));
+  } finally {
+    db.close();
+  }
+}

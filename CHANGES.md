@@ -2,6 +2,20 @@
 
 This file lists the changes in each version, newest first.
 
+## v0.2 — 2026-09-27
+
+### Added
+
+- **Notifications the day before food expires.** Turn them on in **More → Notifications**. One notification lists what expires tomorrow, plus anything that expires today, e.g. "Today: 🍗 Chicken / Tomorrow: 🥛 Milk".
+  - Each item is notified once per use-by date. If you change the date, you're notified again.
+  - Includes a **Send a test** button, and can be turned off at any time.
+  - **When they arrive:** Fridge checks each time it opens or comes back to the screen. On Android (Chrome, installed app) it also checks in the background about once a day. Without a server, iPhone doesn't let web apps run in the background, so on iPhone they appear when you open Fridge. For an alert at a fixed time, keep using the calendar reminders.
+  - On iPhone, notifications need the Home Screen app. In a Safari tab the app explains how to install it first.
+  - Clear messages when notifications are blocked or not supported.
+  - On iPhone, allowing notifications also lets the Home Screen icon show the badge with the number of items to use soon.
+- **Undo "Opened" at any time.** The Opened button is now a toggle: tap it again (it shows "Opened ✓") to mark the item as not opened. The use-by date goes back to what it was before opening. The edit form's Opened / Not opened switch does the same.
+  - If you moved the item or changed its date after opening it, the newer date is kept.
+
 ## v0.1.1 — 2026-09-27
 
 ### Added

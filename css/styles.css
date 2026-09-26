@@ -205,6 +205,7 @@ label { display: block; }
 .item-actions .act-ate { color: var(--good); }
 .item-actions .act-waste { color: var(--bad); }
 .item-actions .ic { width: 21px; height: 21px; }
+.item-actions button.on { color: var(--brand); background: var(--brand-soft); }
 
 /* Empty states */
 .empty { text-align: center; padding: 2.5rem 1rem; }

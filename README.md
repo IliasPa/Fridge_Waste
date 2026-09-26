@@ -16,11 +16,12 @@ Fridge is a free web app that keeps track of the food in your **fridge, freezer 
 | **Smart dates** | Each item gets a default use-by date based on its category and where you store it. Quick buttons: +2 days, +5 days, +1 week, +2 weeks, +1 month. Optionally, the app can read the printed date from a photo (on-device OCR), and you always confirm the result. |
 | **Opened / Move** | Tapping *Opened* shortens the remaining life (for example, milk gets about 4 days). Moving an item to the freezer extends its date, and taking it out of the freezer gives it a short "thawed" life. |
 | **Use first** | Expired items show in red, items expiring within 2 days in orange, and items expiring within 5 days in yellow. A badge counts the urgent ones. |
-| **One-tap actions** | Ate it · Threw out · Opened · Move, with Undo. |
+| **One-tap actions** | Ate it · Threw out · Opened · Move, with Undo. Tapped "Opened" by mistake? Tap it again to restore the original date. |
 | **Shopping list** | Anything you ate or threw out can go back on the list with one tap. You can share the list. |
 | **Stats** | Items eaten vs. thrown out each month, your waste rate, and the money wasted if you entered prices. |
 | **What can I cook?** | 25 simple (mostly Greek) recipe ideas, ranked by what expires soonest. |
-| **Reminders** | Download a calendar file (.ics) with one event per item and an alert 1 and/or 2 days before, at a time you choose. |
+| **Notifications** | Optional notification the day before food expires (see below for how this works on iPhone). |
+| **Calendar reminders** | Download a calendar file (.ics) with one event per item and an alert 1 and/or 2 days before, at a time you choose. |
 | **Backup** | Export and import everything as a JSON file. |
 
 ## Install on your iPhone
@@ -33,6 +34,13 @@ Fridge is a free web app that keeps track of the food in your **fridge, freezer 
 The first time you scan, allow camera access. If you said no by mistake, turn it back on in **Settings → Apps → Safari → Camera**.
 
 If the live camera doesn't work, tap **Take a photo of the barcode** on the scan screen. It uses the iPhone's own camera and needs no permission. This happens with Lockdown Mode, if you opened the link inside Viber, Messenger or Instagram, or if camera access was denied. You can also type the barcode number.
+
+**Notifications on iPhone:**
+
+1. Open Fridge from the Home Screen.
+2. Go to **More → Notifications → Turn on notifications** and tap **Allow**.
+
+iPhone only lets web apps run while they're open, and a server would be needed to wake them up. So notifications about food expiring tomorrow appear when you open Fridge. They don't arrive at a set time. For a guaranteed alert at a fixed time, also add the calendar reminders. On Android (Chrome, installed app), Fridge also checks in the background about once a day.
 
 **Calendar reminders on iPhone:** go to **More → Calendar reminders → Download**, then tap **Add All**. If nothing happens when you're inside the Home Screen app, open the same link in Safari and do it there. Safari always hands .ics files to the Calendar app. After the first time, use **"Only new since last time"** so you don't get duplicate events. Events stay in your calendar after you eat the item, so just ignore those.
 
@@ -111,6 +119,7 @@ js/db.js                storage (IndexedDB, with localStorage fallback)
 js/scanner.js           barcode camera and Open Food Facts lookup
 js/ocr.js               expiry-date reading (Tesseract.js)
 js/ics.js               calendar file builder
+js/notify.js            notifications (permission, showing, Android background check)
 js/utils.js, icons.js   helpers and SVG icons
 lib/html5-qrcode.min.js barcode library (bundled, works offline)
 icons/                  app icons and iPhone splash screens
@@ -121,7 +130,7 @@ icons/                  app icons and iPhone splash screens
 - **Barcode lookup** needs internet. Offline, the app asks for the name once and remembers it.
 - **Date-from-photo** downloads the Tesseract.js text reader (about 5 MB) from a free CDN the first time you use it. After that it's cached and works offline. It reads numeric dates best (e.g. `30/09/2026`, `09.2026`), and you always confirm the date before it's used.
 - **iPhones with Lockdown Mode** block IndexedDB, WebAssembly and the live camera. Fridge switches to basic storage, and barcodes can still be scanned with **Take a photo of the barcode**, but "Read date from photo" isn't available. To get everything, turn off Lockdown Mode for this site in Safari's website settings.
-- **No push notifications**, because those would need a server. Use the calendar file for alerts. The in-app badge and the red/orange/yellow colours show what's urgent.
+- **No push notifications**, because those would need a server. Notifications appear when the app runs, plus in the background on Android. For alerts at a fixed time on iPhone, use the calendar file. The in-app badge and the red/orange/yellow colours show what's urgent.
 - The shelf-life defaults are rough household guides, not food-safety advice. Always check the label.
 
 ## Credits
