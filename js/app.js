@@ -4,14 +4,14 @@ import { CATEGORIES, LOCATIONS, LOCATION_EMOJI, QUICK_PICKS, PICK_GROUPS } from 
 import { RECIPES } from './recipes.js';
 import { t, tr, setLang, getLang, catName, groupName } from './i18n.js';
 import * as db from './db.js';
-import { todayStr, addDays, addMonths, daysUntil, formatDate, monthKey, norm, esc, uid, money, $, $$, saveFile, isIOS, isStandalone } from './utils.js';
+import { todayStr, addDays, addMonths, daysUntil, formatDate, monthKey, norm, esc, uid, money, $, $$, saveFile, isIOS, isStandalone, isInAppBrowser } from './utils.js';
 import { cat, pickById, homeLocation, defaultExpiry, openedExpiry, movedExpiry } from './rules.js';
 import { buildICS } from './ics.js';
-import { startScanner, stopScanner, lookupOFF } from './scanner.js';
+import { startScanner, stopScanner, lookupOFF, scanPhoto, cameraProblem, liveCameraSupported } from './scanner.js';
 import { recognizeDate } from './ocr.js';
 import { ICONS } from './icons.js';
 
-const APP_VERSION = '0.1';
+const APP_VERSION = '0.2';
 
 /* ======================================================================
    State
@@ -701,6 +701,16 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
 /* ======================================================================
    Barcode scanner sheet
    ====================================================================== */
+/* Help text for why the live camera didn't start (see cameraProblem). */
+function cameraHelp(problem) {
+  if (isInAppBrowser()) return t('camInApp');
+  if (problem === 'unsupported') return t('camUnsupported');
+  if (problem === 'denied') {
+    return t(isIOS() ? 'camDeniedIOS' : /Android/i.test(navigator.userAgent) ? 'camDeniedAndroid' : 'camDeniedOther');
+  }
+  return t({ notfound: 'camNotFound', busy: 'camBusy' }[problem] || 'camOther');
+}
+
 function openScanSheet() {
   let busy = false;
   let closed = false;
@@ -710,33 +720,88 @@ function openScanSheet() {
     html: `
       <div id="scanView" class="scan-view"></div>
       <p class="muted small center" id="scanMsg">${t('scanHint')}</p>
+      <p class="note warn" id="scanHelp" hidden></p>
+      <div class="stack">
+        <label class="btn" id="scanPhotoBtn" for="scanPhotoFile">${icon('camera')} ${t('scanPhoto')}</label>
+        <button class="btn subtle" id="scanRetry" type="button" hidden>${t('camRetry')}</button>
+      </div>
+      <input type="file" accept="image/*" capture="environment" id="scanPhotoFile" hidden>
       <form class="barcode-form" id="barcodeForm">
         <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="${esc(t('typeBarcode'))}" autocomplete="off">
         <button class="btn" type="submit">${t('lookUp')}</button>
       </form>`,
     onMount: async (body) => {
+      const view = $('#scanView', body);
+      const msg = $('#scanMsg', body);
+      const help = $('#scanHelp', body);
+      const photoBtn = $('#scanPhotoBtn', body);
+      const retry = $('#scanRetry', body);
+
       const handle = async (code) => {
         if (busy) return;
         busy = true;
-        $('#scanMsg', body).textContent = t('lookingUp');
+        msg.hidden = false;
+        msg.textContent = t('lookingUp');
         await stopScanner();
         await handleBarcode(code);
         closeSheet();
       };
+
+      // Live camera failed: explain why and point to the photo option.
+      const showProblem = (problem) => {
+        view.hidden = true;
+        msg.hidden = true;
+        help.textContent = cameraHelp(problem);
+        help.hidden = false;
+        photoBtn.classList.add('primary');
+        retry.hidden = problem === 'unsupported';
+      };
+
+      const startCamera = async () => {
+        view.hidden = false;
+        msg.hidden = false;
+        msg.textContent = t('scanHint');
+        help.hidden = true;
+        retry.hidden = true;
+        try {
+          await startScanner('scanView', handle);
+          if (closed) stopScanner(); // sheet was closed while the camera was starting
+        } catch (err) {
+          if (closed || busy) return;
+          console.warn(err);
+          await stopScanner();
+          showProblem(cameraProblem(err));
+        }
+      };
+      retry.onclick = startCamera;
+
+      // Photo with the phone's own camera app: works without camera permission.
+      // Free the live camera first so the two don't fight over it.
+      photoBtn.onclick = () => {
+        stopScanner();
+        if (liveCameraSupported()) retry.hidden = false;
+      };
+      $('#scanPhotoFile', body).onchange = async (e) => {
+        const file = e.target.files[0];
+        e.target.value = '';
+        if (!file || busy) return;
+        view.hidden = true;
+        msg.hidden = false;
+        msg.textContent = t('scanPhotoReading');
+        const code = await scanPhoto(file).catch(() => null);
+        if (closed) return;
+        if (code) handle(code);
+        else msg.textContent = t('scanPhotoNone');
+      };
+
       $('#barcodeForm', body).onsubmit = (e) => {
         e.preventDefault();
         const code = e.target.elements.code.value.replace(/\D/g, '');
         if (code.length >= 6) handle(code);
       };
-      try {
-        await startScanner('scanView', handle);
-        if (closed) stopScanner(); // sheet was closed while the camera was starting
-      } catch (err) {
-        if (closed) return;
-        console.warn(err);
-        $('#scanMsg', body).textContent = t('cameraError');
-        $('#scanView', body).classList.add('failed');
-      }
+
+      if (liveCameraSupported()) startCamera();
+      else showProblem('unsupported');
     },
     onClose: () => { closed = true; stopScanner(); },
   });

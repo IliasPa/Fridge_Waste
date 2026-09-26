@@ -32,6 +32,8 @@ Fridge is a free web app that keeps track of the food in your **fridge, freezer 
 
 The first time you scan, allow camera access. If you said no by mistake, turn it back on in **Settings → Apps → Safari → Camera**.
 
+If the live camera doesn't work, tap **Take a photo of the barcode** on the scan screen. It uses the iPhone's own camera and needs no permission. This happens with Lockdown Mode, if you opened the link inside Viber, Messenger or Instagram, or if camera access was denied. You can also type the barcode number.
+
 **Calendar reminders on iPhone:** go to **More → Calendar reminders → Download**, then tap **Add All**. If nothing happens when you're inside the Home Screen app, open the same link in Safari and do it there. Safari always hands .ics files to the Calendar app. After the first time, use **"Only new since last time"** so you don't get duplicate events. Events stay in your calendar after you eat the item, so just ignore those.
 
 **Your data:** when the app is installed on the Home Screen, iOS keeps its storage. Still, use **More → Export backup** now and then (it saves a file to Files or iCloud Drive). Use the same button to move your data to your MacBook.
@@ -118,7 +120,7 @@ icons/                  app icons and iPhone splash screens
 
 - **Barcode lookup** needs internet. Offline, the app asks for the name once and remembers it.
 - **Date-from-photo** downloads the Tesseract.js text reader (about 5 MB) from a free CDN the first time you use it. After that it's cached and works offline. It reads numeric dates best (e.g. `30/09/2026`, `09.2026`), and you always confirm the date before it's used.
-- **iPhones with Lockdown Mode** have no IndexedDB and no WebAssembly. Fridge switches to basic storage and works normally there, but "Read date from photo" isn't available. To get everything, turn off Lockdown Mode for this site in Safari's website settings.
+- **iPhones with Lockdown Mode** block IndexedDB, WebAssembly and the live camera. Fridge switches to basic storage, and barcodes can still be scanned with **Take a photo of the barcode**, but "Read date from photo" isn't available. To get everything, turn off Lockdown Mode for this site in Safari's website settings.
 - **No push notifications**, because those would need a server. Use the calendar file for alerts. The in-app badge and the red/orange/yellow colours show what's urgent.
 - The shelf-life defaults are rough household guides, not food-safety advice. Always check the label.
 

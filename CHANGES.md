@@ -2,6 +2,24 @@
 
 This file lists the changes in each version, newest first.
 
+## v0.2 — 2026-09-27
+
+### Added
+
+- **Take a photo of the barcode.** A new button on the scan screen opens the phone's own camera app and reads the barcode from the photo. It doesn't need the browser's camera permission, so it works where the live camera is blocked: Lockdown Mode, in-app browsers (Viber, Messenger, Instagram…), or after camera access was denied. Sideways barcodes are read too.
+- **Try the live camera again** button, so you don't have to close the scan screen after changing a permission.
+
+### Fixed
+
+- Some devices never asked for camera permission, and the scan screen showed only a black box. The app now works out why the camera didn't start and shows matching help:
+  - camera blocked on iPhone
+  - camera blocked on Android
+  - Lockdown Mode or a browser without camera support
+  - opened inside another app's built-in browser
+  - no camera found
+  - camera in use by another app
+- In "Read date from photo", the date field and button no longer show before the photo has been read.
+
 ## v0.1 — 2026-09-27
 
 ### Fixed

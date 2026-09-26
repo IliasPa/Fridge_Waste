@@ -93,6 +93,8 @@ export function loadScript(src) {
 }
 
 export const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+/* Browsers built into other apps (Viber, Messenger, Instagram…), which often block the camera. */
+export const isInAppBrowser = () => /FBAN|FBAV|FB_IAB|FBIOS|Instagram|Messenger|Viber|Line\/|MicroMessenger|Snapchat|TikTok|musical_ly|LinkedInApp/i.test(navigator.userAgent);
 export const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 
 /* Saves a file. On iPhone the share sheet ("Save to Files", AirDrop…) is the
