@@ -1,0 +1,65 @@
+# Changes
+
+This file lists the changes in each version, newest first.
+
+## v0.0 — 2026-09-26
+
+This is the first release of Fridge. It's a free, offline-first web app (PWA) that tracks the food in your fridge, freezer and pantry.
+
+### Added
+
+**App and platform**
+
+- Static web app with no build step, so it can be hosted free on GitHub Pages or Netlify.
+- Installable on the iPhone Home Screen: web app manifest, app icons, maskable icon, and splash screens for the iPhone 15 Pro Max and iPhone 15/15 Pro.
+- Works offline: the service worker pre-caches the app files, and the OCR library and product photos are cached the first time they're used.
+- Mobile-first layout with a bottom tab bar for one-handed use, large tap targets, and support for the iPhone notch and home indicator.
+- Light, dark and automatic themes.
+- English and Greek (Ελληνικά), switchable in **More → Settings**.
+
+**Storage and backup**
+
+- All data is stored on the device in IndexedDB. There are no accounts and no server.
+- The app asks the browser to keep its storage permanently.
+- Export and import of a JSON backup, with a choice to replace or merge.
+- A reminder appears when the last backup is more than 30 days old.
+- Erase-all-data option.
+
+**Adding items**
+
+- Barcode scanning with the camera, using html5-qrcode (bundled, works offline). A code must be read twice in a row, to avoid misreads.
+- Free product lookup in Open Food Facts: name, brand, image, and category mapped to the app's categories.
+- Products are remembered on the device. If a product is unknown or you're offline, you type its name once and it's known the next time.
+- Barcode number can also be typed by hand.
+- Quick-pick grid with about 70 loose items in 6 groups, including Greek staples (feta, graviera, kasseri, mizithra, horta, tzatziki, taramosalata, gemista, moussaka/pastitsio, spanakopita, koulouri, phyllo, souvlaki).
+- "Recent" row to add something you've added before again.
+- Search-as-you-type on the Add screen, and "Add ‘…’" for any new name. The category is guessed from the name.
+- Quantity, with each unit counted separately in the stats, and an optional price per item.
+- Optional "Read date from photo" using on-device OCR (Tesseract.js). It understands numeric, month-name and month/year date formats, and you always confirm or correct the result.
+
+**Dates and rules**
+
+- Editable shelf-life table in `js/defaults.js`: 29 categories × fridge, freezer and pantry, plus days left after opening and after thawing.
+- Quick date buttons: +2 days, +5 days, +1 week, +2 weeks, +1 month, or pick a date.
+- **Opened** shortens the date according to category (e.g. milk to about 4 days).
+- **Move** into the freezer extends the date. Taking an item out of the freezer gives a short thawed life. Moving between fridge and pantry never lengthens the date.
+
+**Home screen**
+
+- "Use first" section: expired in red, 2 days or less in orange, 5 days or less in yellow.
+- Filters for All, Fridge, Freezer and Pantry, with counts. Search across names, brands and categories.
+- One-tap **Ate it / Threw out / Opened / Move** on every item, each with Undo.
+- Tapping an item opens it for editing or deleting.
+- Badge showing how many items are expired or expire within 2 days. It appears on the Home tab and in the page title, and on the app icon where iOS supports it.
+
+**Reminders**
+
+- Calendar (.ics) file export: one event per item on its use-by day, at a time you choose, with alerts 1 day, 2 days, or both before.
+- "Only new since last time" option, to avoid duplicate events.
+
+**Extras**
+
+- Shopping list with a "Recently used up" section: add anything you ate or threw out back to the list with one tap. The list can be shared.
+- Monthly stats: eaten vs. thrown out, waste rate, money wasted (from prices), most thrown-out items, and a 6-month chart.
+- "What can I cook?": 25 built-in simple recipes, mostly Greek, ranked by how urgently their ingredients need using.
+- README with iPhone install and free hosting instructions.
