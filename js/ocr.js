@@ -29,6 +29,8 @@ async function preprocess(file) {
 }
 
 export async function recognizeDate(file, onStatus) {
+  // Tesseract needs WebAssembly, which e.g. Safari's Lockdown Mode turns off.
+  if (!globalThis.WebAssembly) throw Object.assign(new Error('WebAssembly unavailable'), { code: 'unsupported' });
   onStatus?.('loading', 0);
   await loadScript(TESSERACT_URL);
   const worker = await window.Tesseract.createWorker('eng', 1, {

@@ -3,7 +3,7 @@
 Fridge is a free web app that keeps track of the food in your **fridge, freezer and pantry**, so you eat things before they go bad. You install it on your iPhone's Home Screen and it then works like a normal app, even offline.
 
 - **Free to run.** No accounts, no server and no paid APIs.
-- **Private.** All your data stays on your device, in the browser's IndexedDB storage.
+- **Private.** All your data stays on your device, in the browser's IndexedDB storage (or localStorage if IndexedDB isn't available).
 - **English and Ελληνικά**, with a light and a dark theme.
 
 **Live app:** https://iliaspa.github.io/Fridge_Waste/ (once GitHub Pages is switched on, see below)
@@ -105,7 +105,7 @@ js/defaults.js          ← editable shelf-life defaults and quick picks
 js/rules.js             date rules (default, opened, moved)
 js/recipes.js           built-in recipes
 js/i18n.js              English and Greek text
-js/db.js                IndexedDB storage
+js/db.js                storage (IndexedDB, with localStorage fallback)
 js/scanner.js           barcode camera and Open Food Facts lookup
 js/ocr.js               expiry-date reading (Tesseract.js)
 js/ics.js               calendar file builder
@@ -118,6 +118,7 @@ icons/                  app icons and iPhone splash screens
 
 - **Barcode lookup** needs internet. Offline, the app asks for the name once and remembers it.
 - **Date-from-photo** downloads the Tesseract.js text reader (about 5 MB) from a free CDN the first time you use it. After that it's cached and works offline. It reads numeric dates best (e.g. `30/09/2026`, `09.2026`), and you always confirm the date before it's used.
+- **iPhones with Lockdown Mode** have no IndexedDB and no WebAssembly. Fridge switches to basic storage and works normally there, but "Read date from photo" isn't available. To get everything, turn off Lockdown Mode for this site in Safari's website settings.
 - **No push notifications**, because those would need a server. Use the calendar file for alerts. The in-app badge and the red/orange/yellow colours show what's urgent.
 - The shelf-life defaults are rough household guides, not food-safety advice. Always check the label.
 

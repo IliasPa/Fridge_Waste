@@ -11,7 +11,7 @@ import { startScanner, stopScanner, lookupOFF } from './scanner.js';
 import { recognizeDate } from './ocr.js';
 import { ICONS } from './icons.js';
 
-const APP_VERSION = '0.0';
+const APP_VERSION = '0.1';
 
 /* ======================================================================
    State
@@ -214,10 +214,19 @@ function go(tab) {
 /* ======================================================================
    HOME
    ====================================================================== */
+/* Warns when the browser can't use normal storage (see db.js). */
+function storageNotice(where) {
+  const kind = db.getBackend();
+  if (kind === 'memory') return `<p class="note warn">${esc(t('storageMemory'))}</p>`;
+  if (kind === 'localstorage' && where === 'more') return `<p class="note">${esc(t('storageBasic'))}</p>`;
+  return '';
+}
+
 function renderHome(view) {
   const items = active();
   if (!items.length) {
     view.innerHTML = `
+      ${storageNotice('home')}
       <div class="empty">
         <div class="empty-emoji">🧊</div>
         <h2>${t('emptyTitle')}</h2>
@@ -229,6 +238,7 @@ function renderHome(view) {
   }
   const count = (loc) => items.filter((i) => loc === 'all' || i.location === loc).length;
   view.innerHTML = `
+    ${storageNotice('home')}
     <div class="searchbar">
       ${icon('search')}
       <input id="homeSearch" type="search" placeholder="${esc(t('search'))}" value="${esc(state.query)}" autocomplete="off">
@@ -797,7 +807,7 @@ function openOcrSheet(file, onPick) {
         });
       } catch (err) {
         console.warn(err);
-        status.textContent = t('ocrError', { msg: '' });
+        status.textContent = err.code === 'unsupported' ? t('ocrUnsupported') : t('ocrError', { msg: '' });
         manual.hidden = false;
       }
     },
@@ -1075,6 +1085,7 @@ function renderMore(view) {
 
     <section class="card">
       <h3>${icon('save')} ${t('backup')}</h3>
+      ${storageNotice('more')}
       ${needsBackup ? `<p class="note">${t('backupNudge')}</p>` : ''}
       <p class="muted small">${t('backupText')}</p>
       <div class="row gap">

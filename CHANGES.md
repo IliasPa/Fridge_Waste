@@ -2,6 +2,19 @@
 
 This file lists the changes in each version, newest first.
 
+## v0.1 — 2026-09-27
+
+### Fixed
+
+- The app no longer crashes with **"Can't find variable: indexedDB"** on iPhones with **Lockdown Mode** turned on, or in other browsers that don't provide IndexedDB storage. It now falls back to the browser's simpler localStorage and works normally.
+- If a browser blocks all storage, the app still opens. A warning explains that items won't be saved and how to fix it.
+- If Lockdown Mode is later turned off, the items saved in the fallback storage move into IndexedDB automatically on the next launch.
+- "Read date from photo" now says clearly when the browser can't run the text reader (Lockdown Mode turns off WebAssembly), instead of wrongly saying it needs internet.
+
+### Changed
+
+- **More → Backup** shows a note when the app is using the fallback storage, suggesting regular backups.
+
 ## v0.0 — 2026-09-26
 
 This is the first release of Fridge. It's a free, offline-first web app (PWA) that tracks the food in your fridge, freezer and pantry.

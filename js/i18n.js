@@ -77,6 +77,7 @@ const STRINGS = {
     ocrError: 'Text reader needs internet the first time. {msg}',
     ocrUse: 'Use this date',
     ocrTip: 'Take a close, sharp photo of just the printed date.',
+    ocrUnsupported: 'This browser can’t run the text reader (Lockdown Mode turns off what it needs). Please type the date.',
     takePhoto: 'Take photo',
     // shopping
     shopTitle: 'Shopping list',
@@ -132,6 +133,8 @@ const STRINGS = {
     imported: 'Backup imported',
     exported: 'Backup saved',
     backupNudge: 'It’s been a while since your last backup.',
+    storageBasic: 'This browser limits storage (for example, Lockdown Mode is on), so Fridge uses basic storage. Everything works, but export a backup regularly.',
+    storageMemory: '⚠️ This browser won’t let Fridge save anything (for example, Lockdown Mode or a private tab). Your items will disappear when you close it. In Safari’s website settings for this page, turn off Lockdown Mode, or open the link in a normal tab.',
     // settings
     settings: 'Settings',
     language: 'Language',
@@ -212,6 +215,7 @@ const STRINGS = {
     ocrError: 'Ο αναγνώστης χρειάζεται internet την πρώτη φορά. {msg}',
     ocrUse: 'Χρήση ημερομηνίας',
     ocrTip: 'Βγάλτε κοντινή, καθαρή φωτογραφία μόνο της ημερομηνίας.',
+    ocrUnsupported: 'Αυτός ο browser δεν μπορεί να τρέξει τον αναγνώστη κειμένου (η Λειτουργία απομόνωσης τον απενεργοποιεί). Πληκτρολογήστε την ημερομηνία.',
     takePhoto: 'Φωτογραφία',
     shopTitle: 'Λίστα αγορών',
     addToList: 'Προσθήκη στη λίστα…',
@@ -262,6 +266,8 @@ const STRINGS = {
     imported: 'Το αντίγραφο εισήχθη',
     exported: 'Το αντίγραφο αποθηκεύτηκε',
     backupNudge: 'Έχει περάσει καιρός από το τελευταίο αντίγραφο.',
+    storageBasic: 'Αυτός ο browser περιορίζει την αποθήκευση (π.χ. είναι ενεργή η Λειτουργία απομόνωσης), οπότε το Fridge χρησιμοποιεί απλή αποθήκευση. Όλα λειτουργούν, αλλά κάνετε συχνά εξαγωγή αντιγράφου.',
+    storageMemory: '⚠️ Αυτός ο browser δεν επιτρέπει στο Fridge να αποθηκεύσει τίποτα (π.χ. Λειτουργία απομόνωσης ή ιδιωτική καρτέλα). Τα τρόφιμα θα χαθούν όταν το κλείσετε. Στις ρυθμίσεις ιστότοπου του Safari για αυτή τη σελίδα απενεργοποιήστε τη Λειτουργία απομόνωσης ή ανοίξτε τον σύνδεσμο σε κανονική καρτέλα.',
     settings: 'Ρυθμίσεις',
     language: 'Γλώσσα',
     theme: 'Εμφάνιση', themeAuto: 'Αυτόματα', themeLight: 'Φωτεινή', themeDark: 'Σκοτεινή',

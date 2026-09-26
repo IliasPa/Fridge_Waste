@@ -9,7 +9,7 @@
 
    If you add or rename app files, add them to APP_FILES and bump VERSION. */
 
-const VERSION = 'v0.0';
+const VERSION = 'v0.1';
 const APP_CACHE = `fridge-app-${VERSION}`;
 const RUNTIME_CACHE = 'fridge-runtime';
 
