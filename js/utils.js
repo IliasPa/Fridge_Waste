@@ -33,10 +33,13 @@ export function addMonths(s, n) {
   return ymd(d);
 }
 
-/* Whole days from today until the date (negative = in the past). */
-export function daysUntil(s) {
-  return Math.round((parseYmd(s) - parseYmd(todayStr())) / 86400000);
+/* Whole days from date a to date b (negative if b is earlier). */
+export function daysBetween(a, b) {
+  return Math.round((parseYmd(b) - parseYmd(a)) / 86400000);
 }
+
+/* Whole days from today until the date (negative = in the past). */
+export const daysUntil = (s) => daysBetween(todayStr(), s);
 
 export function formatDate(s, lang, withYear) {
   const d = parseYmd(s);

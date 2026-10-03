@@ -4,15 +4,16 @@ import { CATEGORIES, LOCATIONS, LOCATION_EMOJI, QUICK_PICKS, PICK_GROUPS } from 
 import { RECIPES } from './recipes.js';
 import { t, tr, setLang, getLang, catName, groupName } from './i18n.js';
 import * as db from './db.js';
-import { todayStr, addDays, addMonths, daysUntil, formatDate, monthKey, norm, esc, uid, money, $, $$, saveFile, isIOS, isStandalone, isInAppBrowser } from './utils.js';
+import { todayStr, addDays, addMonths, daysUntil, daysBetween, formatDate, monthKey, norm, esc, uid, money, $, $$, saveFile, isIOS, isStandalone, isInAppBrowser } from './utils.js';
 import { cat, pickById, homeLocation, defaultExpiry, openedExpiry, movedExpiry } from './rules.js';
 import { buildICS } from './ics.js';
 import { startScanner, stopScanner, lookupOFF, scanPhoto, cameraProblem, liveCameraSupported } from './scanner.js';
-import { recognizeDate } from './ocr.js';
+import { recognizeDate, readReceipt, RECEIPT_LANGS, defaultReceiptLang } from './ocr.js';
+import { parseReceipt, mergeTexts, lineKey, findRemembered, guessFood, isStoreCode } from './receipt.js';
 import { notifyPermission, requestPermission, showNotification, setBackgroundCheck } from './notify.js';
 import { ICONS } from './icons.js';
 
-const APP_VERSION = '0.2';
+const APP_VERSION = '0.3';
 
 /* ======================================================================
    State
@@ -26,6 +27,8 @@ const DEFAULT_SETTINGS = {
   lastIcsExport: 0,       // timestamp; items added after it count as "new"
   notify: false,          // notifications the day before food expires
   notifyBg: false,        // Android background check is set up
+  addOpens: 'menu',       // the + tab opens: 'menu' (Add screen) | 'receipt' | 'barcode'
+  receiptLang: defaultReceiptLang(), // language receipts are printed in (Tesseract code)
 };
 
 const state = {
@@ -38,6 +41,8 @@ const state = {
   items: [],            // all items (active + finished)
   shopping: [],
   products: new Map(),  // barcode -> remembered product
+  receiptMemory: {},    // receipt line key -> what it is (see rememberLine)
+  receipts: [],         // receipts added: {id, date, store, total, count, addedTs}
   settings: { ...DEFAULT_SETTINGS },
 };
 
@@ -180,7 +185,7 @@ function renderTabbar() {
   $$('.tabbar [data-tab]').forEach((b) => {
     b.classList.toggle('active', b.dataset.tab === state.tab);
     const label = $('.tab-label', b);
-    if (label) label.textContent = t({ home: 'tabHome', cook: 'tabCook', add: 'tabAdd', shop: 'tabShop', more: 'tabMore' }[b.dataset.tab]);
+    if (label) label.textContent = t({ home: 'tabHome', cook: 'tabCook', add: 'tabAdd', shop: 'tabShop', money: 'tabMoney', more: 'tabMore' }[b.dataset.tab]);
   });
   updateBadge();
 }
@@ -202,9 +207,9 @@ function updateBadge() {
 function render() {
   renderTabbar();
   const view = $('#view');
-  const titles = { home: t('appName'), cook: t('cookTitle'), add: t('addTitle'), shop: t('shopTitle'), more: t('moreTitle') };
+  const titles = { home: t('appName'), cook: t('cookTitle'), add: t('addTitle'), shop: t('shopTitle'), money: t('moneyTitle'), more: t('moreTitle') };
   $('#viewTitle').textContent = titles[state.tab];
-  ({ home: renderHome, cook: renderCook, add: renderAdd, shop: renderShop, more: renderMore })[state.tab](view);
+  ({ home: renderHome, cook: renderCook, add: renderAdd, shop: renderShop, money: renderMoney, more: renderMore })[state.tab](view);
 }
 
 function go(tab) {
@@ -212,6 +217,17 @@ function go(tab) {
   state.tab = tab;
   render();
   window.scrollTo(0, 0);
+}
+
+/* The + tab: the Add screen, plus the receipt reader or the scanner if
+   that's what More → Settings says it should open. Tapping it again on the
+   Add screen opens the scanner. */
+function openAdd() {
+  const again = state.tab === 'add';
+  go('add');
+  const mode = state.settings.addOpens;
+  if (mode === 'receipt') openReceiptSheet();
+  else if (mode === 'barcode' || again) openScanSheet();
 }
 
 /* ======================================================================
@@ -427,9 +443,11 @@ function recentItems() {
 }
 
 function renderAdd(view) {
+  const main = state.settings.addOpens === 'receipt' ? 'receipt' : 'scan';
   view.innerHTML = `
     <div class="add-top">
-      <button class="btn primary big" data-act="scan">${icon('barcode')} ${t('scan')}</button>
+      <button class="btn big ${main === 'receipt' ? 'primary' : ''}" data-act="receipt">${icon('receipt')} ${t('addReceipt')}</button>
+      <button class="btn big ${main === 'scan' ? 'primary' : ''}" data-act="scan">${icon('barcode')} ${t('addBarcode')}</button>
       <button class="btn big" data-act="manual">${icon('pencil')} ${t('typeIt')}</button>
     </div>
     <div class="searchbar">
@@ -504,9 +522,12 @@ function addFromRecent(id) {
 
 /* ======================================================================
    Item form (add + edit)
+   With onSave, nothing is stored: the form hands the item back (used for
+   receipt lines). baseDate is the day the food was bought (default today).
    ====================================================================== */
-function openItemForm(init, { editing = false, note = '' } = {}) {
+function openItemForm(init, { editing = false, note = '', title = '', baseDate = '', dateTouched = editing, onSave = null, onCancel = null } = {}) {
   const today = todayStr();
+  const base = baseDate || today;
   const draft = {
     id: init.id || uid(),
     name: init.name ?? (init.pick ? tr(pickById(init.pick)) : ''),
@@ -525,8 +546,9 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
     addedTs: init.addedTs || Date.now(),
   };
   draft.location = init.location || homeLocation(draft.category, draft.pick);
-  draft.expiresAt = init.expiresAt || defaultExpiry(draft.category, draft.location, draft.pick);
-  let dateTouched = editing;
+  draft.expiresAt = init.expiresAt || defaultExpiry(draft.category, draft.location, draft.pick, base);
+  let touched = dateTouched;
+  let saved = false;
 
   const catOptions = Object.keys(CATEGORIES)
     .map((c) => ({ c, label: catName(c) }))
@@ -536,7 +558,7 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
   const quick = [['plus2d', 2, 'd'], ['plus5d', 5, 'd'], ['plus1w', 7, 'd'], ['plus2w', 14, 'd'], ['plus1m', 1, 'm']];
 
   openSheet({
-    title: editing ? t('editItem') : t('newItem'),
+    title: title || (editing ? t('editItem') : t('newItem')),
     tall: true,
     html: `
     <form class="item-form" novalidate>
@@ -586,7 +608,7 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
 
       <div class="form-actions">
         ${editing ? `<button type="button" class="btn danger" id="fDelete">${icon('trash')} ${t('delete')}</button>` : ''}
-        <button type="submit" class="btn primary big grow">${editing ? t('save') : t('add')}</button>
+        <button type="submit" class="btn primary big grow">${editing || onSave ? t('save') : t('add')}</button>
       </div>
     </form>`,
     onMount: (body, close) => {
@@ -604,7 +626,7 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
         const d = daysUntil(draft.expiresAt);
         $('#fDateHint', body).textContent = d < 0 ? t('expired') : d === 0 ? t('today') : d === 1 ? t('tomorrow') : t('inDays', { n: d });
       };
-      const recompute = () => { if (!dateTouched) { draft.expiresAt = defaultExpiry(draft.category, draft.location, draft.pick); paintDate(); } };
+      const recompute = () => { if (!touched) { draft.expiresAt = defaultExpiry(draft.category, draft.location, draft.pick, base); paintDate(); } };
       const paintOpened = () => $$('#fOpened button', body).forEach((b) => b.classList.toggle('on', (b.dataset.opened === '1') === !!draft.openedAt));
 
       paintThumb(); paintLoc(); paintDate(); paintOpened();
@@ -630,7 +652,7 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
         };
       });
       // A date you set yourself wins over the one from before opening.
-      const setDate = (date) => { draft.expiresAt = date; draft.expiresBeforeOpen = null; dateTouched = true; paintDate(); };
+      const setDate = (date) => { draft.expiresAt = date; draft.expiresBeforeOpen = null; touched = true; paintDate(); };
       f.expiresAt.onchange = () => { if (f.expiresAt.value) setDate(f.expiresAt.value); };
       $$('[data-add]', body).forEach((b) => {
         b.onclick = () => {
@@ -689,6 +711,12 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
           qty: Math.max(1, parseInt(f.qty.value, 10) || 1),
           price: Number.isFinite(price) && price >= 0 ? price : null,
         };
+        saved = true;
+        if (onSave) {
+          close();
+          onSave(item, { dateTouched: touched });
+          return;
+        }
         if (!editing) {
           // Keep the original record fields when editing; set fresh ones when adding.
           item.addedAt = today;
@@ -714,6 +742,7 @@ function openItemForm(init, { editing = false, note = '' } = {}) {
       // Typing a new name: focus the field straight away.
       if (!draft.name) setTimeout(() => f.name.focus(), 300);
     },
+    onClose: () => { if (!saved) onCancel?.(); },
   });
 }
 
@@ -730,13 +759,9 @@ function cameraHelp(problem) {
   return t({ notfound: 'camNotFound', busy: 'camBusy' }[problem] || 'camOther');
 }
 
-function openScanSheet() {
-  let busy = false;
-  let closed = false;
-  const closeSheet = openSheet({
-    title: t('scanTitle'),
-    tall: true,
-    html: `
+/* The scanner's parts: live camera, photo of the barcode, typed number. */
+function scannerHtml() {
+  return `
       <div id="scanView" class="scan-view"></div>
       <p class="muted small center" id="scanMsg">${t('scanHint')}</p>
       <p class="note warn" id="scanHelp" hidden></p>
@@ -748,81 +773,109 @@ function openScanSheet() {
       <form class="barcode-form" id="barcodeForm">
         <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="${esc(t('typeBarcode'))}" autocomplete="off">
         <button class="btn" type="submit">${t('lookUp')}</button>
-      </form>`,
-    onMount: async (body) => {
-      const view = $('#scanView', body);
-      const msg = $('#scanMsg', body);
-      const help = $('#scanHelp', body);
-      const photoBtn = $('#scanPhotoBtn', body);
-      const retry = $('#scanRetry', body);
+      </form>`;
+}
 
-      const handle = async (code) => {
-        if (busy) return;
-        busy = true;
-        msg.hidden = false;
-        msg.textContent = t('lookingUp');
+/* Runs the scanner inside a sheet built with scannerHtml(). Calls
+   onCode(code) for each barcode read; codes that arrive while it's still
+   working on one are ignored. The camera keeps running between codes, so
+   several products can be scanned in a row. */
+function mountScanner(body, onCode) {
+  let busy = false;
+  let closed = false;
+  const view = $('#scanView', body);
+  const msg = $('#scanMsg', body);
+  const help = $('#scanHelp', body);
+  const photoBtn = $('#scanPhotoBtn', body);
+  const retry = $('#scanRetry', body);
+
+  const handle = async (code) => {
+    if (busy || closed) return;
+    busy = true;
+    msg.hidden = false;
+    msg.textContent = t('lookingUp');
+    try {
+      await onCode(code);
+    } finally {
+      busy = false;
+      if (!closed) msg.textContent = t('scanHint');
+    }
+  };
+
+  // Live camera failed: explain why and point to the photo option.
+  const showProblem = (problem) => {
+    view.hidden = true;
+    msg.hidden = true;
+    help.textContent = cameraHelp(problem);
+    help.hidden = false;
+    photoBtn.classList.add('primary');
+    retry.hidden = problem === 'unsupported';
+  };
+
+  const startCamera = async () => {
+    view.hidden = false;
+    msg.hidden = false;
+    msg.textContent = t('scanHint');
+    help.hidden = true;
+    retry.hidden = true;
+    try {
+      await startScanner('scanView', handle);
+      if (closed) stopScanner(); // sheet was closed while the camera was starting
+    } catch (err) {
+      if (closed) return;
+      console.warn(err);
+      await stopScanner();
+      showProblem(cameraProblem(err));
+    }
+  };
+  retry.onclick = startCamera;
+
+  // Photo with the phone's own camera app: works without camera permission.
+  // Free the live camera first so the two don't fight over it.
+  photoBtn.onclick = () => {
+    stopScanner();
+    if (liveCameraSupported()) retry.hidden = false;
+  };
+  $('#scanPhotoFile', body).onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file || busy) return;
+    view.hidden = true;
+    msg.hidden = false;
+    msg.textContent = t('scanPhotoReading');
+    const code = await scanPhoto(file).catch(() => null);
+    if (closed) return;
+    if (code) handle(code);
+    else msg.textContent = t('scanPhotoNone');
+  };
+
+  $('#barcodeForm', body).onsubmit = (e) => {
+    e.preventDefault();
+    const input = e.target.elements.code;
+    const code = input.value.replace(/\D/g, '');
+    if (code.length >= 6) { input.value = ''; handle(code); }
+  };
+
+  if (liveCameraSupported()) startCamera();
+  else showProblem('unsupported');
+
+  return { stop: () => { closed = true; stopScanner(); }, busy: () => busy };
+}
+
+function openScanSheet() {
+  let scanner;
+  const closeSheet = openSheet({
+    title: t('scanTitle'),
+    tall: true,
+    html: scannerHtml(),
+    onMount: (body) => {
+      scanner = mountScanner(body, async (code) => {
         await stopScanner();
         await handleBarcode(code);
         closeSheet();
-      };
-
-      // Live camera failed: explain why and point to the photo option.
-      const showProblem = (problem) => {
-        view.hidden = true;
-        msg.hidden = true;
-        help.textContent = cameraHelp(problem);
-        help.hidden = false;
-        photoBtn.classList.add('primary');
-        retry.hidden = problem === 'unsupported';
-      };
-
-      const startCamera = async () => {
-        view.hidden = false;
-        msg.hidden = false;
-        msg.textContent = t('scanHint');
-        help.hidden = true;
-        retry.hidden = true;
-        try {
-          await startScanner('scanView', handle);
-          if (closed) stopScanner(); // sheet was closed while the camera was starting
-        } catch (err) {
-          if (closed || busy) return;
-          console.warn(err);
-          await stopScanner();
-          showProblem(cameraProblem(err));
-        }
-      };
-      retry.onclick = startCamera;
-
-      // Photo with the phone's own camera app: works without camera permission.
-      // Free the live camera first so the two don't fight over it.
-      photoBtn.onclick = () => {
-        stopScanner();
-        if (liveCameraSupported()) retry.hidden = false;
-      };
-      $('#scanPhotoFile', body).onchange = async (e) => {
-        const file = e.target.files[0];
-        e.target.value = '';
-        if (!file || busy) return;
-        view.hidden = true;
-        msg.hidden = false;
-        msg.textContent = t('scanPhotoReading');
-        const code = await scanPhoto(file).catch(() => null);
-        if (closed) return;
-        if (code) handle(code);
-        else msg.textContent = t('scanPhotoNone');
-      };
-
-      $('#barcodeForm', body).onsubmit = (e) => {
-        e.preventDefault();
-        const code = e.target.elements.code.value.replace(/\D/g, '');
-        if (code.length >= 6) handle(code);
-      };
-
-      if (liveCameraSupported()) startCamera();
-      else showProblem('unsupported');
+      });
     },
-    onClose: () => { closed = true; stopScanner(); },
+    onClose: () => scanner?.stop(),
   });
 }
 
@@ -897,6 +950,471 @@ function openOcrSheet(file, onPick) {
     },
     onClose: () => URL.revokeObjectURL(preview),
   });
+}
+
+/* ======================================================================
+   RECEIPTS — read a receipt, check the lines, add the food
+   Each line is matched, in order, to: a line identified before (receipt
+   memory), a quick pick it looks like (a guess, shown as such), or nothing
+   yet ("needs a name"). Scanning the product's barcode, or typing its name,
+   teaches Fridge that line for every receipt after.
+   ====================================================================== */
+const round2 = (n) => Math.round(n * 100) / 100;
+const saveReceiptMemory = () => db.setMeta('receiptMemory', state.receiptMemory);
+
+/* Remembers what a receipt line is, for next time. */
+function rememberLine(row) {
+  if (!row.text) return;
+  const it = row.item;
+  const key = lineKey(row.text);
+  const old = state.receiptMemory[key] || {};
+  state.receiptMemory[key] = {
+    text: row.text,
+    name: itemName(it),
+    pick: it.pick || null,
+    renamed: !!it.renamed,
+    category: it.category,
+    location: it.location,
+    barcode: isStoreCode(it.barcode) ? '' : it.barcode || '',
+    brand: it.brand || '',
+    image: it.image || '',
+    days: row.dateTouched ? row.days : old.days ?? null, // a use-by you chose yourself
+    ts: Date.now(),
+  };
+}
+
+/* Default use-by for a line: what you chose last time, else the shelf-life table. */
+function rowDate(row, base) {
+  const it = row.item;
+  return row.days != null ? addDays(base, row.days) : defaultExpiry(it.category, it.location, it.pick, base);
+}
+
+function setRowItem(row, s, info) {
+  row.item = {
+    name: info.name || row.text,
+    pick: info.pick || null,
+    renamed: !!info.renamed,
+    category: info.category || 'other',
+    brand: info.brand || '',
+    image: info.image || '',
+    barcode: info.barcode || '',
+  };
+  row.item.location = info.location || homeLocation(row.item.category, row.item.pick);
+  row.item.expiresAt = rowDate(row, s.date);
+}
+
+/* A line nobody has identified yet: guess from the quick picks. */
+function guessRow(row, s) {
+  const g = guessFood(row.text);
+  row.status = g?.pick ? 'guess' : 'unknown';
+  row.days = null;
+  setRowItem(row, s, { name: g?.pick ? tr(pickById(g.pick)) : row.text, pick: g?.pick, category: g?.category });
+}
+
+const rowSig = (line) => `${lineKey(line.text)}|${line.total}`;
+
+function makeRow(line, s) {
+  const row = {
+    id: uid(), sig: rowSig(line), text: line.text, qty: line.qty, weight: line.weight, total: line.total,
+    price: round2(line.total / (line.qty || 1)), include: true, days: null, dateTouched: false,
+  };
+  const mem = findRemembered(line.text, state.receiptMemory);
+  if (mem?.skip || (!mem && line.notFood)) {
+    row.status = 'nonfood';
+    row.include = false;
+    setRowItem(row, s, {});
+  } else if (mem) {
+    const p = mem.barcode && state.products.get(mem.barcode);
+    row.status = 'known';
+    row.days = mem.days ?? null;
+    setRowItem(row, s, { ...mem, ...(p ? { name: p.name, brand: p.brand, image: p.image, category: p.category } : {}) });
+  } else {
+    guessRow(row, s);
+  }
+  return row;
+}
+
+/* (Re)builds the lines from everything read so far, keeping what you've
+   already done to lines that were there before. */
+function buildRows(s) {
+  const parsed = parseReceipt(mergeTexts(s.texts));
+  s.store = parsed.store || s.store;
+  s.total = parsed.total ?? s.total;
+  s.sum = parsed.sum;
+  if (!s.dateSet && parsed.date) s.date = parsed.date;
+  const old = new Map(s.rows.filter((r) => !r.manual).map((r) => [r.sig, r]));
+  s.rows = [...parsed.rows.map((line) => old.get(rowSig(line)) || makeRow(line, s)), ...s.rows.filter((r) => r.manual)];
+}
+
+function openReceiptSheet() {
+  const s = { texts: [], rows: [], date: todayStr(), dateSet: false, store: '', total: null, sum: 0, busy: false, closed: false };
+  s.close = openSheet({
+    title: t('rcTitle'),
+    tall: true,
+    html: '<div class="rc"></div>',
+    onMount: (body) => { s.el = $('.rc', body); renderReceiptStart(s); },
+    onClose: () => { s.closed = true; },
+  });
+}
+
+const langOptions = (sel) => Object.entries(RECEIPT_LANGS)
+  .map(([code, name]) => `<option value="${code}" ${code === sel ? 'selected' : ''}>${esc(name)}</option>`).join('');
+
+function renderReceiptStart(s, problem = '') {
+  s.el.innerHTML = `
+    ${problem ? `<p class="note warn">${esc(problem)}</p>` : `<p class="muted">${t('rcIntro')}</p>`}
+    <div class="stack">
+      <label class="btn primary big" for="rcCamera">${icon('camera')} ${t('rcTakePhoto')}</label>
+      <label class="btn big" for="rcFiles">${icon('upload')} ${t('rcChoose')}</label>
+    </div>
+    <input type="file" id="rcCamera" accept="image/*" capture="environment" hidden>
+    <input type="file" id="rcFiles" accept="image/*,application/pdf,.pdf" multiple hidden>
+    <ul class="tips small">${['rcTipFlat', 'rcTipLong', 'rcTipApp'].map((k) => `<li>${t(k)}</li>`).join('')}</ul>
+    <label><span class="lbl">${t('rcLang')}</span><select id="rcLang">${langOptions(state.settings.receiptLang)}</select></label>`;
+  $('#rcLang', s.el).onchange = (e) => saveSettings({ receiptLang: e.target.value });
+  for (const id of ['#rcCamera', '#rcFiles']) $(id, s.el).onchange = (e) => onReceiptFiles(s, e);
+}
+
+function onReceiptFiles(s, e) {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (files.length) readReceiptFiles(s, files);
+}
+
+async function readReceiptFiles(s, files) {
+  if (s.busy) return;
+  s.busy = true;
+  const photo = files.find((f) => f.type.startsWith('image/'));
+  const preview = photo ? URL.createObjectURL(photo) : '';
+  s.el.innerHTML = `
+    <div class="rc-reading">
+      ${preview ? `<img class="ocr-preview" src="${preview}" alt="">` : `<div class="rc-doc">${icon('receipt')}</div>`}
+      <p id="rcStatus">${t('rcLoading')}</p>
+      <div class="progress indef"><span id="rcBar"></span></div>
+      <p class="muted small">${t('rcPrivate')}</p>
+    </div>`;
+  const status = $('#rcStatus', s.el);
+  const bar = $('#rcBar', s.el);
+  const show = (text, p) => {
+    status.textContent = text;
+    bar.parentElement.classList.toggle('indef', p == null);
+    bar.style.width = `${p ?? 0}%`;
+  };
+  try {
+    const texts = await readReceipt(files, state.settings.receiptLang, (phase, info = {}) => {
+      if (s.closed) return;
+      if (phase === 'pdf') show(t('rcPdf'));
+      else if (phase === 'loading') show(t('rcLoading'));
+      else if (phase === 'download') show(t('rcDownload', { p: info.p }), info.p);
+      else if (phase === 'reading') show(info.n > 1 ? t('rcReadingN', info) : t('rcReading', info), info.p);
+    });
+    if (s.closed) return;
+    s.texts.push(...texts);
+    buildRows(s);
+    if (!s.rows.length) {
+      s.texts = [];
+      renderReceiptStart(s, t('rcNothing'));
+      return;
+    }
+    renderReceiptReview(s);
+  } catch (err) {
+    console.warn(err);
+    if (s.closed) return;
+    const msg = err.code === 'unsupported' ? t('rcUnsupported') : t('rcError');
+    if (s.rows.length) { renderReceiptReview(s); toast(msg); } else renderReceiptStart(s, msg);
+  } finally {
+    s.busy = false;
+    if (preview) URL.revokeObjectURL(preview);
+  }
+}
+
+function rcRowHtml(r) {
+  const it = r.item;
+  const unnamed = r.status === 'unknown' || r.status === 'nonfood';
+  const name = unnamed ? r.text : itemName(it);
+  const emoji = it.pick && !it.renamed ? pickById(it.pick).emoji : cat(it.category).emoji;
+  const thumb = it.image ? `<img src="${esc(it.image)}" alt="" loading="lazy">` : unnamed ? '🧾' : emoji;
+  const d = daysUntil(it.expiresAt);
+  const due = d < 0 ? t('expired') : d === 0 ? t('today') : d === 1 ? t('tomorrow') : t('inDays', { n: d });
+  const meta = [
+    r.status !== 'nonfood' ? `${LOCATION_EMOJI[it.location]} ${esc(due)}` : '',
+    r.weight ? t('rcWeight', { w: String(r.weight).replace('.', ',') }) : '',
+    r.status === 'guess' ? `<span class="pill">${t('rcGuess')}</span>` : '',
+  ].filter(Boolean).join(' · ');
+  return `
+    <li class="rc-row ${r.include ? '' : 'off'}" data-row="${r.id}">
+      <button class="rc-inc" data-rc="${r.status === 'nonfood' && !r.include ? 'food' : 'toggle'}" aria-pressed="${r.include}" aria-label="${esc(t('rcInclude', { name }))}">${r.include ? icon('check') : ''}</button>
+      <button class="rc-main" data-rc="edit">
+        <span class="thumb">${thumb}</span>
+        <span class="info">
+          <span class="name">${esc(name)}${r.qty > 1 ? ` <span class="qty">×${r.qty}</span>` : ''}</span>
+          ${!unnamed && r.text ? `<span class="rc-src">${esc(r.text)}</span>` : ''}
+          <span class="meta">${meta}</span>
+        </span>
+        <span class="rc-price">${money(r.total)}</span>
+      </button>
+      ${r.status === 'unknown' ? `
+      <div class="rc-acts">
+        <button class="btn small" data-rc="scan">${icon('barcode')} ${t('rcScanOne')}</button>
+        <button class="btn small" data-rc="name">${icon('pencil')} ${t('rcNameIt')}</button>
+        <button class="btn small subtle" data-rc="nonfood">${t('rcNotFood')}</button>
+      </div>` : ''}
+    </li>`;
+}
+
+function renderReceiptReview(s) {
+  if (s.closed) return;
+  const food = s.rows.filter((r) => r.status !== 'nonfood');
+  const unknown = food.filter((r) => r.status === 'unknown');
+  const found = food.filter((r) => r.status !== 'unknown');
+  const other = s.rows.filter((r) => r.status === 'nonfood');
+  const chosen = s.rows.filter((r) => r.include);
+  const unnamed = chosen.filter((r) => r.status === 'unknown' || r.status === 'nonfood').length;
+
+  // Do the lines add up to the printed total? Then nothing was missed.
+  const sum = round2(s.sum + s.rows.filter((r) => r.manual).reduce((a, r) => a + r.total, 0));
+  let check;
+  if (s.total == null) check = `<p class="rc-check">${t('rcNoTotal', { n: s.rows.length, sum: money(sum) })}</p>`;
+  else if (Math.abs(sum - s.total) <= 0.05) check = `<p class="rc-check ok">${icon('check')} ${t('rcAllFound', { n: s.rows.length })}</p>`;
+  else check = `<p class="rc-check warn">${t('rcMissing', { sum: money(sum), total: money(s.total) })}</p>`;
+
+  s.el.innerHTML = `
+    <div class="rc-head">
+      <div class="rc-store">${icon('receipt')} <strong>${esc(s.store || t('rcReceipt'))}</strong>${s.total != null ? `<span class="rc-total">${money(s.total)}</span>` : ''}</div>
+      <label class="rc-date"><span>${t('rcBoughtOn')}</span><input type="date" id="rcDate" value="${s.date}" max="${todayStr()}"></label>
+      ${check}
+    </div>
+    ${unknown.length ? `
+    <section class="rc-sec">
+      <div class="rc-sec-head">
+        <h3 class="section-title">${t('rcNeedName')} <span class="muted">${unknown.length}</span></h3>
+        <button class="btn small primary" data-rc="scanAll">${icon('barcode')} ${t('rcScanAll')}</button>
+      </div>
+      <p class="muted small">${t('rcNeedNameHint')}</p>
+      <ul class="rc-list">${unknown.map(rcRowHtml).join('')}</ul>
+    </section>` : ''}
+    ${found.length ? `
+    <section class="rc-sec">
+      <h3 class="section-title">${t('rcFound')} <span class="muted">${found.length}</span></h3>
+      <ul class="rc-list">${found.map(rcRowHtml).join('')}</ul>
+    </section>` : ''}
+    ${other.length ? `
+    <details class="rc-sec" ${other.some((r) => r.include) ? 'open' : ''}>
+      <summary class="section-title">${t('rcNotFoodTitle')} <span class="muted">${other.length}</span></summary>
+      <p class="muted small">${t('rcNotFoodHint')}</p>
+      <ul class="rc-list">${other.map(rcRowHtml).join('')}</ul>
+    </details>` : ''}
+    <div class="row gap rc-more">
+      <label class="btn small subtle" for="rcMoreFiles">${icon('camera')} ${t('rcMorePhotos')}</label>
+      <button class="btn small subtle" data-rc="addLine">${icon('plus')} ${t('rcAddLine')}</button>
+    </div>
+    <input type="file" id="rcMoreFiles" accept="image/*,application/pdf,.pdf" multiple hidden>
+    <details class="rc-raw"><summary class="muted small">${t('rcRaw')}</summary><pre>${esc(mergeTexts(s.texts))}</pre></details>
+    <div class="form-actions">
+      ${unnamed ? `<p class="small muted">${t('rcUnnamed', { n: unnamed })}</p>` : ''}
+      <button class="btn primary big" data-rc="commit" ${chosen.length ? '' : 'disabled'}>${chosen.length ? t('rcAddN', { n: chosen.length }) : t('rcAddNone')}</button>
+    </div>`;
+
+  s.el.onclick = (e) => {
+    const b = e.target.closest('[data-rc]');
+    if (!b || b.disabled) return;
+    const row = s.rows.find((r) => r.id === b.closest('[data-row]')?.dataset.row);
+    receiptAction(s, b.dataset.rc, row);
+  };
+  $('#rcDate', s.el).onchange = (e) => {
+    if (!e.target.value) return;
+    s.date = e.target.value;
+    s.dateSet = true;
+    for (const r of s.rows) if (!r.dateTouched) r.item.expiresAt = rowDate(r, s.date);
+    renderReceiptReview(s);
+  };
+  $('#rcMoreFiles', s.el).onchange = (e) => onReceiptFiles(s, e);
+}
+
+function receiptAction(s, act, row) {
+  switch (act) {
+    case 'toggle': row.include = !row.include; break;
+    case 'food': guessRow(row, s); row.include = true; row.markedFood = true; break;
+    case 'nonfood': row.status = 'nonfood'; row.include = false; break;
+    case 'edit': editRow(s, row); return;
+    case 'name': editRow(s, row, { typeName: true }); return;
+    case 'scan': openIdentifySheet(s, [row]); return;
+    case 'scanAll': openIdentifySheet(s, s.rows.filter((r) => r.status === 'unknown')); return;
+    case 'addLine': addReceiptLine(s); return;
+    case 'commit': commitReceipt(s); return;
+    default: return;
+  }
+  renderReceiptReview(s);
+}
+
+/* Opens the item form for a receipt line. typeName starts with an empty
+   name (for a line you're identifying); barcode is one just scanned. */
+function editRow(s, row, { typeName = false, barcode = '', note = '', after, cancel } = {}) {
+  const it = row.item;
+  openItemForm({
+    name: typeName ? '' : itemName(it),
+    pick: typeName ? null : it.pick, renamed: it.renamed,
+    category: it.category, location: it.location, brand: it.brand, image: it.image,
+    barcode: barcode || it.barcode, qty: row.qty, price: row.price, expiresAt: it.expiresAt,
+  }, {
+    title: t('rcLineTitle'),
+    note: note || t('rcLineNote', { text: row.text || '—' }),
+    baseDate: s.date,
+    dateTouched: row.dateTouched,
+    onSave: async (item, { dateTouched }) => {
+      row.item = {
+        name: item.name, pick: item.pick, renamed: item.renamed, category: item.category, location: item.location,
+        brand: item.brand, image: item.image, barcode: item.barcode, expiresAt: item.expiresAt,
+      };
+      row.qty = item.qty;
+      row.price = item.price;
+      if (dateTouched) { row.dateTouched = true; row.days = daysBetween(s.date, item.expiresAt); }
+      row.status = 'known';
+      row.include = true;
+      if (row.text) { rememberLine(row); await saveReceiptMemory(); }
+      if (item.barcode && !isStoreCode(item.barcode) && !state.products.has(item.barcode)) {
+        await rememberProduct({ barcode: item.barcode, name: item.name, brand: item.brand, image: item.image, category: item.category, location: item.location, price: item.price, savedAt: Date.now() });
+      }
+      renderReceiptReview(s);
+      after?.();
+    },
+    onCancel: cancel,
+  });
+}
+
+/* A line the reader missed, typed in by hand. */
+function addReceiptLine(s) {
+  openItemForm({ name: '', category: 'other' }, {
+    title: t('rcAddLine'),
+    baseDate: s.date,
+    onSave: (item, { dateTouched }) => {
+      s.rows.push({
+        id: uid(), manual: true, text: '', qty: item.qty, weight: null, price: item.price,
+        total: round2((item.price || 0) * item.qty), status: 'known', include: true, dateTouched, days: null,
+        item: {
+          name: item.name, pick: item.pick, renamed: item.renamed, category: item.category, location: item.location,
+          brand: '', image: '', barcode: '', expiresAt: item.expiresAt,
+        },
+      });
+      renderReceiptReview(s);
+    },
+  });
+}
+
+/* Identifies a line from a product's barcode: the products you've scanned
+   before, then Open Food Facts, else you type its name once. Resolves to
+   true when the line is identified. */
+async function identifyByBarcode(s, row, code) {
+  let info = state.products.get(code);
+  let isNew = false;
+  if (!info && !isStoreCode(code)) {
+    try {
+      const f = await lookupOFF(code, getLang());
+      if (f?.name) { info = { name: [f.name, f.quantity].filter(Boolean).join(' '), brand: f.brand, image: f.image, category: f.category }; isNew = true; }
+    } catch { /* offline: ask for the name */ }
+  }
+  if (!info) {
+    return new Promise((resolve) => editRow(s, row, {
+      typeName: true, barcode: code, note: t('rcNewProduct', { text: row.text }),
+      after: () => resolve(true), cancel: () => resolve(false),
+    }));
+  }
+  setRowItem(row, s, { ...info, barcode: code });
+  row.status = 'known';
+  row.include = true;
+  if (isNew) {
+    await rememberProduct({ barcode: code, name: info.name, brand: info.brand, image: info.image, category: info.category, location: row.item.location, price: row.price, savedAt: Date.now() });
+  }
+  rememberLine(row);
+  await saveReceiptMemory();
+  toast(t('rcIdentified', { name: info.name }));
+  return true;
+}
+
+/* Walks through lines that need a name with the camera on: scan each
+   product's barcode, or type a name, or say it isn't food. */
+function openIdentifySheet(s, queue) {
+  if (!queue.length) return;
+  let i = 0;
+  let scanner;
+  openSheet({
+    title: t('rcIdTitle'),
+    tall: true,
+    html: `
+      <div class="rc-id">
+        <span class="muted small" id="idStep"></span>
+        <strong id="idText"></strong>
+        <span class="muted small" id="idPrice"></span>
+      </div>
+      ${scannerHtml()}
+      <div class="stack">
+        <button class="btn" type="button" id="idName">${icon('pencil')} ${t('rcNoBarcode')}</button>
+        <div class="row gap">
+          <button class="btn grow" type="button" id="idNotFood">${t('rcNotFood')}</button>
+          <button class="btn subtle grow" type="button" id="idSkip">${t('rcSkip')}</button>
+        </div>
+      </div>`,
+    onMount: (body, close) => {
+      const show = () => {
+        if (i >= queue.length) { close(); return; }
+        const r = queue[i];
+        $('#idStep', body).textContent = queue.length > 1 ? t('rcIdStep', { i: i + 1, n: queue.length }) : t('rcIdOne');
+        $('#idText', body).textContent = r.text;
+        $('#idPrice', body).textContent = money(r.total) + (r.qty > 1 ? ` · ×${r.qty}` : '');
+      };
+      const next = () => { i++; renderReceiptReview(s); show(); };
+      scanner = mountScanner(body, async (code) => {
+        if (i < queue.length && await identifyByBarcode(s, queue[i], code)) next();
+      });
+      // While a barcode is being looked up, the buttons wait.
+      const ready = () => i < queue.length && !scanner.busy();
+      $('#idName', body).onclick = () => { if (ready()) editRow(s, queue[i], { typeName: true, after: next }); };
+      $('#idNotFood', body).onclick = () => { if (ready()) { Object.assign(queue[i], { status: 'nonfood', include: false }); next(); } };
+      $('#idSkip', body).onclick = () => { if (ready()) next(); };
+      show();
+    },
+    onClose: () => { scanner?.stop(); renderReceiptReview(s); },
+  });
+}
+
+async function commitReceipt(s) {
+  const chosen = s.rows.filter((r) => r.include);
+  if (!chosen.length) return;
+  const now = Date.now();
+  const receipt = { id: uid(), date: s.date, store: s.store, total: s.total ?? round2(s.sum), count: count(chosen), addedTs: now };
+  const items = chosen.map((r, n) => {
+    const it = r.item;
+    const unnamed = r.status === 'unknown' || r.status === 'nonfood';
+    return {
+      id: uid(), name: unnamed ? r.text : itemName(it), pick: unnamed ? null : it.pick || null, renamed: !!it.renamed,
+      category: it.category, brand: it.brand || '', image: it.image || '', barcode: it.barcode || '',
+      qty: r.qty || 1, price: r.price ?? null, openedAt: null, expiresBeforeOpen: null, status: 'active',
+      addedAt: s.date, addedTs: now + n, location: it.location, expiresAt: it.expiresAt, receiptId: receipt.id,
+    };
+  });
+  for (const it of items) await saveItem(it);
+
+  // Learn from this receipt: lines you kept as food, and lines that aren't food.
+  for (const r of s.rows) {
+    if (!r.text) continue;
+    if (r.include && (r.status === 'known' || r.status === 'guess')) rememberLine(r);
+    else if (!r.include && r.status === 'nonfood') state.receiptMemory[lineKey(r.text)] = { text: r.text, skip: true, ts: now };
+    else if (r.markedFood && state.receiptMemory[lineKey(r.text)]?.skip) delete state.receiptMemory[lineKey(r.text)];
+  }
+  await saveReceiptMemory();
+  state.receipts.push(receipt);
+  await db.setMeta('receipts', state.receipts);
+
+  s.close();
+  state.tab = 'home';
+  render();
+  window.scrollTo(0, 0);
+  toast(t('rcAdded', { n: items.length }), [{ label: t('undo'), run: async () => {
+    for (const it of items) await removeItem(it.id);
+    state.receipts = state.receipts.filter((x) => x.id !== receipt.id);
+    await db.setMeta('receipts', state.receipts);
+    refresh();
+  } }]);
 }
 
 /* ======================================================================
@@ -1067,74 +1585,137 @@ function recipeCard({ r, uses, missing }) {
 }
 
 /* ======================================================================
-   MORE: stats, reminders, backup, settings
+   MONEY: what food cost, and what was thrown away
+   Spent = prices of food added that month (from receipts, or typed in).
+   Eaten / thrown out = prices of food finished that month.
    ====================================================================== */
+const locale = () => (getLang() === 'el' ? 'el-GR' : 'en-GB');
 function monthLabel(key) {
   const [y, m] = key.split('-').map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString(getLang() === 'el' ? 'el-GR' : 'en-GB', { month: 'long', year: 'numeric' });
+  return new Date(y, m - 1, 1).toLocaleDateString(locale(), { month: 'long', year: 'numeric' });
 }
 function shiftMonth(key, n) { return monthKey(addMonths(key + '-01', n)); }
 
-function monthStats(key) {
-  const rows = finished().filter((i) => i.finishedAt && monthKey(i.finishedAt) === key);
-  const eaten = rows.filter((i) => i.status === 'eaten');
-  const wasted = rows.filter((i) => i.status === 'wasted');
-  const n = (list) => list.reduce((s, i) => s + (i.qty || 1), 0);
-  const cost = (list) => list.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
-  return { eaten: n(eaten), wasted: n(wasted), moneyWasted: cost(wasted), hasPrices: rows.some((i) => i.price), wastedRows: wasted };
+const cost = (list) => list.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0);
+const count = (list) => list.reduce((s, i) => s + (i.qty || 1), 0);
+/* Short money for tight spots: "1.234 €" instead of "1.234,00 €". */
+const moneyShort = (n) => (n >= 100 ? `${Math.round(n).toLocaleString('el-GR')} €` : money(n));
+
+function monthMoney(key) {
+  const bought = state.items.filter((i) => i.addedAt && monthKey(i.addedAt) === key);
+  const done = finished().filter((i) => i.finishedAt && monthKey(i.finishedAt) === key);
+  const eaten = done.filter((i) => i.status === 'eaten');
+  const wasted = done.filter((i) => i.status === 'wasted');
+  return {
+    spent: cost(bought), bought: count(bought), unpriced: count(bought.filter((i) => i.price == null)),
+    eatenMoney: cost(eaten), wastedMoney: cost(wasted), eaten: count(eaten), wasted: count(wasted), wastedRows: wasted,
+  };
 }
 
-function statsCard() {
-  const key = state.statsMonth;
-  const s = monthStats(key);
-  const total = s.eaten + s.wasted;
-  const rate = total ? Math.round((s.wasted / total) * 100) : 0;
-  const isCurrent = key === monthKey(todayStr());
-
-  // Top thrown-out items this month
-  const counts = {};
-  for (const it of s.wastedRows) { const k = itemName(it); counts[k] = (counts[k] || 0) + (it.qty || 1); }
-  const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3);
-
-  // Last 6 months bars (eaten vs thrown out)
+/* Last 6 months: spent vs thrown out (or items eaten vs thrown out when
+   there are no prices yet). Tap a month to see it above. */
+function moneyChart(sel) {
   const months = Array.from({ length: 6 }, (_, i) => shiftMonth(monthKey(todayStr()), i - 5));
-  const data = months.map((m) => ({ m, ...monthStats(m) }));
-  const max = Math.max(1, ...data.map((d) => d.eaten + d.wasted));
-
+  const data = months.map((m) => ({ m, ...monthMoney(m) }));
+  const priced = data.some((d) => d.spent || d.eatenMoney || d.wastedMoney);
+  const A = priced ? t('spentShort') : t('eaten');
+  const B = t('wasted');
+  const a = (d) => (priced ? d.spent : d.eaten);
+  const b = (d) => (priced ? d.wastedMoney : d.wasted);
+  const fmt = (v) => (priced ? moneyShort(v) : String(v));
+  const max = Math.max(...data.map((d) => Math.max(a(d), b(d)))) || 1;
+  const height = (v) => (v > 0 ? Math.max(2, Math.round((v / max) * 100)) : 0);
+  const short = (m) => new Date(m + '-01T00:00').toLocaleDateString(locale(), { month: 'short' });
   return `
   <section class="card">
-    <div class="card-head">
-      <h3>${icon('chart')} ${t('stats')}</h3>
+    <h3>${icon('chart')} ${t('last6')}</h3>
+    <div class="legend small"><span class="key key-a"></span>${esc(A)} <span class="key key-b"></span>${esc(B)}</div>
+    <div class="mchart">
+      ${data.map((d) => `
+      <button class="mcol ${d.m === sel ? 'sel' : ''}" data-setmonth="${d.m}" aria-label="${esc(`${monthLabel(d.m)}: ${A} ${fmt(a(d))}, ${B} ${fmt(b(d))}`)}">
+        <span class="mval">${d.m === sel ? fmt(a(d)) : ''}</span>
+        <span class="mbars"><span class="mbar a" style="height:${height(a(d))}%"></span><span class="mbar b" style="height:${height(b(d))}%"></span></span>
+        <small>${esc(short(d.m))}</small>
+        <span class="mtip" aria-hidden="true"><strong>${fmt(a(d))}</strong> ${esc(A)}<br><strong>${fmt(b(d))}</strong> ${esc(B)}</span>
+      </button>`).join('')}
     </div>
+    <table class="sr-only">
+      <caption>${t('last6')}</caption>
+      <tr><th>${t('month')}</th><th>${esc(A)}</th><th>${esc(B)}</th></tr>
+      ${data.map((d) => `<tr><td>${esc(monthLabel(d.m))}</td><td>${fmt(a(d))}</td><td>${fmt(b(d))}</td></tr>`).join('')}
+    </table>
+  </section>`;
+}
+
+function renderMoney(view) {
+  const key = state.statsMonth;
+  const m = monthMoney(key);
+  const isCurrent = key === monthKey(todayStr());
+  const receipts = state.receipts.filter((r) => monthKey(r.date) === key)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.addedTs - a.addedTs);
+  const priced = m.spent > 0 || m.eatenMoney > 0 || m.wastedMoney > 0;
+  const done = priced ? m.eatenMoney + m.wastedMoney : m.eaten + m.wasted;
+  const rate = done ? Math.round(((priced ? m.wastedMoney : m.wasted) / done) * 100) : null;
+  const atRisk = cost(active().filter((i) => daysUntil(i.expiresAt) <= 2));
+
+  // Thrown out this month, biggest losses first
+  const lost = {};
+  for (const it of m.wastedRows) {
+    const name = itemName(it);
+    const e = (lost[name] ||= { name, emoji: itemEmoji(it), n: 0, money: 0 });
+    e.n += it.qty || 1;
+    e.money += (it.price || 0) * (it.qty || 1);
+  }
+  const top = Object.values(lost).sort((a, b) => b.money - a.money || b.n - a.n).slice(0, 5);
+
+  view.innerHTML = `
+    ${atRisk > 0 ? `<button class="note warn money-risk" data-go="home"><span>${t('atRisk', { money: money(atRisk) })}</span><strong>${t('atRiskBtn')} ›</strong></button>` : ''}
     <div class="month-nav">
       <button class="icon-btn" data-month="-1" aria-label="‹">${icon('left')}</button>
       <strong>${esc(monthLabel(key))}</strong>
       <button class="icon-btn" data-month="1" ${isCurrent ? 'disabled' : ''} aria-label="›">${icon('right')}</button>
     </div>
-    ${total ? `
-    <div class="stat-row">
-      <div class="stat good"><strong>${s.eaten}</strong><span>${t('eaten')}</span></div>
-      <div class="stat bad"><strong>${s.wasted}</strong><span>${t('wasted')}</span></div>
-      <div class="stat"><strong>${rate}%</strong><span>${t('wasteRate')}</span></div>
-    </div>
-    <div class="ratio" role="img" aria-label="${rate}%"><span class="ratio-good" style="flex:${s.eaten}"></span><span class="ratio-bad" style="flex:${s.wasted}"></span></div>
-    <p>${t('moneyWasted')}: <strong>${s.hasPrices ? money(s.moneyWasted) : '—'}</strong>${s.hasPrices ? '' : ` <small class="muted">${t('moneyHint')}</small>`}</p>
-    ${top.length ? `<p class="small">${t('topWasted')}: ${top.map(([n, c]) => `${esc(n)} ×${c}`).join(', ')}</p>` : ''}
-    ` : `<p class="muted">${t('noStats')}</p>`}
-    <h4 class="small muted">${t('last6')}</h4>
-    <div class="bars">
-      ${data.map((d) => `
-        <div class="bar-col ${d.m === key ? 'sel' : ''}" data-setmonth="${d.m}">
-          <div class="bar-stack" style="height:${Math.round(((d.eaten + d.wasted) / max) * 100)}%">
-            <span class="bar-bad" style="flex:${d.wasted}"></span><span class="bar-good" style="flex:${d.eaten}"></span>
-          </div>
-          <small>${new Date(d.m + '-01T00:00').toLocaleDateString(getLang() === 'el' ? 'el-GR' : 'en-GB', { month: 'short' })}</small>
-        </div>`).join('')}
-    </div>
-    <div class="legend small"><span class="dot good"></span>${t('eaten')} <span class="dot bad"></span>${t('wasted')}</div>
-  </section>`;
+    <section class="card money-hero">
+      <span class="muted">${t('spent')}</span>
+      <strong class="hero">${money(m.spent)}</strong>
+      <span class="muted small">${[
+        t('nItems', { n: m.bought }),
+        receipts.length ? t('nReceipts', { n: receipts.length }) : '',
+        m.unpriced ? t('unpriced', { n: m.unpriced }) : '',
+      ].filter(Boolean).join(' · ')}</span>
+      <div class="stat-row">
+        <div class="stat good"><strong>${priced ? moneyShort(m.eatenMoney) : m.eaten}</strong><span>${t('eaten')}</span></div>
+        <div class="stat bad"><strong>${priced ? moneyShort(m.wastedMoney) : m.wasted}</strong><span>${t('wasted')}</span></div>
+        <div class="stat"><strong>${rate == null ? '—' : rate + '%'}</strong><span>${t('wasteRate')}</span></div>
+      </div>
+      ${done ? `<div class="ratio" role="img" aria-label="${t('wasteRate')} ${rate}%"><span class="ratio-good" style="flex:${priced ? m.eatenMoney : m.eaten}"></span><span class="ratio-bad" style="flex:${priced ? m.wastedMoney : m.wasted}"></span></div>` : ''}
+    </section>
+    ${priced ? '' : `
+    <div class="note money-empty">
+      <p>${t('moneyEmpty')}</p>
+      <button class="btn small primary" data-act="receipt">${icon('receipt')} ${t('rcTitle')}</button>
+    </div>`}
+    ${moneyChart(key)}
+    ${top.length ? `
+    <section class="card">
+      <h3>${icon('trash')} ${t('topWasted')}</h3>
+      <ul class="money-list">${top.map((e) => `
+        <li><span>${e.emoji} ${esc(e.name)}${e.n > 1 ? ` <span class="muted">×${e.n}</span>` : ''}</span><strong>${e.money ? money(e.money) : '—'}</strong></li>`).join('')}
+      </ul>
+    </section>` : ''}
+    ${receipts.length ? `
+    <section class="card">
+      <h3>${icon('receipt')} ${t('receiptsTitle')}</h3>
+      <ul class="money-list">${receipts.map((r) => `
+        <li><span>${esc(r.store || t('rcReceipt'))} <span class="muted small">${esc(formatDate(r.date, getLang()))} · ${t('nItems', { n: r.count })}</span></span><strong>${money(r.total)}</strong></li>`).join('')}
+      </ul>
+    </section>` : ''}
+    <p class="muted small center">${t('itemsCount', { e: m.eaten, w: m.wasted })} · ${t('atHome', { money: money(cost(active())) })}</p>`;
 }
 
+/* ======================================================================
+   MORE: reminders, backup, settings
+   ====================================================================== */
 function upcomingForIcs(onlyNew) {
   const today = todayStr();
   return active().filter((i) => i.expiresAt >= today && (!onlyNew || (i.addedTs || 0) > (state.settings.lastIcsExport || 0)));
@@ -1145,9 +1726,8 @@ function renderMore(view) {
   const allN = upcomingForIcs(false).length;
   const newN = upcomingForIcs(true).length;
   const needsBackup = active().length && (!st.lastBackup || daysUntil(st.lastBackup) < -30);
+  const learned = Object.keys(state.receiptMemory).length;
   view.innerHTML = `
-    ${statsCard()}
-
     ${notifyCard()}
 
     <section class="card">
@@ -1192,6 +1772,12 @@ function renderMore(view) {
       <div class="seg" id="sTheme">
         ${['auto', 'light', 'dark'].map((th) => `<button data-theme="${th}" class="${st.theme === th ? 'on' : ''}">${t('theme' + th[0].toUpperCase() + th.slice(1))}</button>`).join('')}
       </div>
+      <span class="lbl">${t('addOpens')}</span>
+      <div class="seg" id="sAddOpens">
+        ${['menu', 'receipt', 'barcode'].map((m) => `<button data-addopens="${m}" class="${st.addOpens === m ? 'on' : ''}">${t('addOpens_' + m)}</button>`).join('')}
+      </div>
+      <label><span class="lbl">${t('rcLang')}</span><select id="sRcLang">${langOptions(st.receiptLang)}</select></label>
+      ${learned ? `<button class="btn subtle" data-act="forgetLines">${t('rcForget', { n: learned })}</button>` : ''}
       <button class="btn danger subtle" data-act="erase">${icon('trash')} ${t('eraseAll')}</button>
     </section>
 
@@ -1200,6 +1786,17 @@ function renderMore(view) {
   $('#sBefore').value = st.remindBefore;
   $('#sTime').onchange = (e) => saveSettings({ remindTime: e.target.value || '09:00' });
   $('#sBefore').onchange = (e) => saveSettings({ remindBefore: e.target.value });
+  $('#sRcLang').onchange = (e) => saveSettings({ receiptLang: e.target.value });
+}
+
+async function forgetReceiptLines() {
+  const n = Object.keys(state.receiptMemory).length;
+  const ok = await ask(t('rcForgetConfirm', { n }), [{ label: t('rcForgetBtn'), value: true, cls: 'danger' }, { label: t('cancel'), value: false }]);
+  if (!ok) return;
+  state.receiptMemory = {};
+  await saveReceiptMemory();
+  render();
+  toast(t('rcForgotten'));
 }
 
 /* ---------- Notifications (see notify.js for what's possible without a server) ---------- */
@@ -1321,8 +1918,18 @@ async function importBackup(file) {
     { label: t('cancel'), value: null },
   ]);
   if (!mode) return;
-  // Keep this device's settings unless replacing everything.
-  if (mode === 'merge') data.meta = (data.meta || []).filter((m) => m.key !== 'settings');
+  // Merging keeps this device's settings, and adds the backup's receipt
+  // lines and receipts to this device's.
+  if (mode === 'merge') {
+    data.meta = (data.meta || []).filter((m) => m.key !== 'settings').map((m) => {
+      if (m.key === 'receiptMemory') return { ...m, value: { ...(m.value || {}), ...state.receiptMemory } };
+      if (m.key === 'receipts') {
+        const have = new Set(state.receipts.map((r) => r.id));
+        return { ...m, value: [...state.receipts, ...(m.value || []).filter((r) => !have.has(r.id))] };
+      }
+      return m;
+    });
+  }
   await db.importAll(data, mode);
   await loadAll();
   applyTheme();
@@ -1351,8 +1958,8 @@ function bindEvents() {
     if (el.closest('.sheet')) return; // sheets bind their own handlers
 
     if (el.dataset.tab) {
-      if (el.dataset.tab === 'add' && state.tab === 'add') { openScanSheet(); return; }
-      go(el.dataset.tab);
+      if (el.dataset.tab === 'add') openAdd();
+      else go(el.dataset.tab);
       return;
     }
     if (el.dataset.go) { go(el.dataset.go); return; }
@@ -1378,6 +1985,7 @@ function bindEvents() {
       return;
     }
     if (el.dataset.theme) { saveSettings({ theme: el.dataset.theme }).then(() => { applyTheme(); render(); }); return; }
+    if (el.dataset.addopens) { saveSettings({ addOpens: el.dataset.addopens }).then(render); return; }
 
     const act = el.dataset.act;
     if (!act) return;
@@ -1399,6 +2007,8 @@ function bindEvents() {
 
     switch (act) {
       case 'scan': openScanSheet(); break;
+      case 'receipt': openReceiptSheet(); break;
+      case 'forgetLines': forgetReceiptLines(); break;
       case 'manual': openItemForm({ name: '', category: 'other' }); break;
       case 'addNamed': addByName(state.addQuery.trim()); break;
       case 'toggleRecipes': state.showAllRecipes = !state.showAllRecipes; render(); break;
@@ -1435,12 +2045,15 @@ function bindEvents() {
    Start-up
    ====================================================================== */
 async function loadAll() {
-  const [items, shopping, products, settings] = await Promise.all([
+  const [items, shopping, products, settings, receiptMemory, receipts] = await Promise.all([
     db.getAll('items'), db.getAll('shopping'), db.getAll('products'), db.getMeta('settings', null),
+    db.getMeta('receiptMemory', {}), db.getMeta('receipts', []),
   ]);
   state.items = items;
   state.shopping = shopping;
   state.products = new Map(products.map((p) => [p.barcode, p]));
+  state.receiptMemory = receiptMemory;
+  state.receipts = receipts;
   state.settings = { ...DEFAULT_SETTINGS, ...(settings || {}) };
   setLang(state.settings.lang);
 }
@@ -1464,16 +2077,20 @@ async function init() {
   applyTheme();
   bindEvents();
   render();
+  window.fridgeStarted?.(); // the start-up check in index.html can stand down
   registerServiceWorker();
   // Ask the browser not to evict our data under storage pressure.
   navigator.storage?.persist?.().catch(() => {});
   runExpiryNotifications();
   // Deep links from the Home Screen quick actions (manifest shortcuts).
-  const tab = new URLSearchParams(location.search).get('tab');
-  if (tab && ['home', 'cook', 'add', 'shop', 'more'].includes(tab)) go(tab);
+  const params = new URLSearchParams(location.search);
+  const tab = params.get('tab');
+  if (tab && ['home', 'cook', 'add', 'shop', 'money', 'more'].includes(tab)) go(tab);
+  if (params.get('open') === 'receipt') openReceiptSheet();
 }
 
 init().catch((err) => {
   console.error(err);
   $('#view').innerHTML = `<p class="pad">Something went wrong starting the app: ${esc(err.message)}</p>`;
+  window.fridgeOfferRepair?.();
 });

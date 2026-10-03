@@ -37,7 +37,7 @@ function swRegistration() {
 }
 
 export async function showNotification(title, body, tag = 'fridge-expiry') {
-  const icon = new URL('icons/icon-192.png', location.href).href;
+  const icon = new URL('icons/icon.png', location.href).href;
   const options = { body, tag, icon, badge: icon, data: { url: location.href.split('?')[0] } };
   const reg = await swRegistration();
   // iPhone and Android only support notifications shown by the service worker.

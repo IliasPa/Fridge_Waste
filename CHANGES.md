@@ -2,6 +2,33 @@
 
 This file lists the changes in each version, newest first.
 
+## v0.3 — 2026-10-03
+
+### Added
+
+- **Add food from a receipt.** Tap **Add → Receipt**, then take a photo of a supermarket receipt, or choose photos, screenshots or a PDF (for example a digital receipt from the Lidl Plus app). Fridge lists the food on it, with prices.
+  - The receipt is read on the phone; nothing is uploaded. The text reader downloads once (about 3 MB, plus about 1.3 MB for Greek) and then works offline. PDFs that contain text are read directly.
+  - Each line is matched to a line Fridge has learned before, or to a quick pick it looks like (marked "guess"). Lines it doesn't know yet appear under **Needs a name**: tap **Scan barcodes** and scan each product once, or type its name, or mark it as not food. The next receipt with that line is recognised by itself.
+  - Fridge checks that the lines it found add up to the receipt's total, and says when something seems to be missing.
+  - Understands quantities ("2 x 0,89"), weighed food ("0,876 kg x 1,99"), discounts and repeated lines. Bags, bottle deposits and household items are left out, and you can tick them back.
+  - The purchase date is read from the receipt, so use-by dates count from the day you shopped.
+  - Long receipt: take several overlapping photos and choose them together. Lines that appear in two photos are counted once.
+  - Choose the receipt's language (Greek, English, German, French, Italian, Spanish and more) on the receipt screen or in **More → Settings**.
+  - **More → Settings → Forget learned receipt lines** clears what Fridge has learned.
+- **Money tab** in the bottom bar: what you spent on food each month (from receipts or prices you typed), how much of it you ate or threw out, your waste rate, a 6-month chart, your biggest losses, the month's receipts, and how much food at home has expired or expires within 2 days.
+- **More → Settings → The + button opens**: the Add screen (as before), the receipt reader, or the barcode scanner.
+- Home Screen quick action **Scan a receipt** (Android).
+- **Self-repair at start-up.** If the app ever can't start, it deletes its offline copy of the app's files (never your food, list or settings), downloads them again and reloads. If that doesn't help, it shows a **Repair and reload** button.
+
+### Changed
+
+- The monthly stats moved from **More** to the new **Money** tab.
+- The Add screen has three buttons: **Receipt**, **Barcode** and **Type it**.
+- When scanning barcodes for receipt lines, the camera stays on between products, and a pack still in front of the camera isn't read twice.
+- The app icon is now one PNG (`icons/icon.png`) plus `icons/favicon.svg`. The separate icon sizes and the iPhone splash screens were removed, so iOS shows a plain screen for a moment while the app starts.
+- Backups include learned receipt lines and receipts. Merging a backup combines them with this device's.
+- Updates always download a complete, fresh set of files instead of reusing files the browser kept, so an update can't leave old and new files mixed.
+
 ## v0.2 — 2026-09-27
 
 ### Added

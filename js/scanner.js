@@ -29,14 +29,17 @@ function readerOptions(lib) {
 /* Can this browser use a live camera at all? */
 export const liveCameraSupported = () => !!(globalThis.isSecureContext && navigator.mediaDevices?.getUserMedia);
 
-/* Starts the camera inside element #elId and calls onCode(code) once a
-   barcode has been read twice in a row (filters out rare misreads). */
+/* Starts the camera inside element #elId and calls onCode(code) each time
+   a barcode has been read twice in a row (filters out rare misreads). A code
+   is reported again only after it has been out of view for a moment, so a
+   pack still in front of the camera isn't counted twice. */
 export async function startScanner(elId, onCode) {
   if (!liveCameraSupported()) throw Object.assign(new Error('Live camera not supported'), { name: 'NotSupportedError' });
   const lib = await loadLib();
   scanner = new lib.Html5Qrcode(elId, readerOptions(lib));
-  let last = null;
-  let done = false;
+  let prev = null;     // last frame's code
+  let reported = null; // last code reported, and when it was last seen
+  let seenAt = 0;
   starting = scanner.start(
     { facingMode: 'environment' },
     {
@@ -46,12 +49,17 @@ export async function startScanner(elId, onCode) {
       disableFlip: true,
     },
     (text) => {
-      if (done) return;
-      if (text === last) {
-        done = true;
-        onCode(text);
+      const now = Date.now();
+      if (text === reported) {
+        const away = now - seenAt > 2500;
+        seenAt = now;
+        if (!away) return;
       }
-      last = text;
+      if (text !== prev) { prev = text; return; }
+      prev = null;
+      reported = text;
+      seenAt = now;
+      onCode(text);
     },
     () => {} // per-frame "not found" — ignore
   );

@@ -11,19 +11,14 @@
   <meta name="theme-color" content="#f4f6f3" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#111513" media="(prefers-color-scheme: dark)">
   <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
-  <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="icon" href="icons/icon.png" type="image/png" sizes="512x512">
 
   <!-- iPhone Home Screen -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Fridge">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <!-- Splash screens: iPhone 15 Pro Max / 15 Plus / 14 Pro Max, then iPhone 15 / 15 Pro / 14 Pro -->
-  <link rel="apple-touch-startup-image" href="icons/splash-1290x2796.png"
-        media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
-  <link rel="apple-touch-startup-image" href="icons/splash-1179x2556.png"
-        media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-icon" href="icons/icon.png">
 
   <link rel="stylesheet" href="css/styles.css">
 </head>
@@ -54,6 +49,10 @@
       <span class="tab-icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.2a1 1 0 0 0 1 .8h9.6a1 1 0 0 0 1-.8L21 7H6"/></svg></span>
       <span class="tab-label">List</span>
     </button>
+    <button data-tab="money" class="tab">
+      <span class="tab-icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.6a4.2 4.2 0 1 0 0 6.8M7.5 10.8h5.5M7.5 13.2h5.5"/></svg></span>
+      <span class="tab-label">Money</span>
+    </button>
     <button data-tab="more" class="tab">
       <span class="tab-icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span>
       <span class="tab-label">More</span>
@@ -64,6 +63,51 @@
   <input type="file" id="importFile" accept="application/json,.json" hidden>
 
   <noscript><p style="padding:1rem">Fridge needs JavaScript turned on.</p></noscript>
-  <script type="module" src="js/app.js"></script>
+  <script>
+    /* If the app can't start (for example when an update was only half
+       downloaded and the offline copy mixes old and new files), repair it:
+       delete the offline copy of the app's files, fetch them fresh, reload.
+       Your food, list and settings are never touched. It's tried once by
+       itself; if the app still can't start, a button offers it again. */
+    (function () {
+      var started = false;
+      var el = (navigator.language || '').toLowerCase().indexOf('el') === 0;
+      window.fridgeStarted = function () { started = true; };
+      window.fridgeRepair = function () {
+        var reload = function () { location.reload(); };
+        var jobs = [];
+        if (window.caches) jobs.push(caches.keys().then(function (keys) {
+          return Promise.all(keys.filter(function (k) { return k.indexOf('fridge-app-') === 0; }).map(function (k) { return caches.delete(k); }));
+        }));
+        if (navigator.serviceWorker) jobs.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+          return Promise.all(regs.map(function (r) { return r.unregister(); }));
+        }));
+        Promise.all(jobs).then(function () {
+          // Refresh the browser's own copy of every file this page loaded.
+          var urls = [location.href.split('#')[0]].concat((performance.getEntriesByType ? performance.getEntriesByType('resource') : [])
+            .map(function (e) { return e.name; })
+            .filter(function (u) { return u.indexOf(location.origin + '/') === 0; }));
+          return Promise.all(urls.map(function (u) { return fetch(u, { cache: 'reload' }).catch(function () {}); }));
+        }).then(reload, reload);
+      };
+      window.fridgeOfferRepair = function () {
+        if (started || document.getElementById('repair')) return;
+        var last = Date.now();
+        try { last = +localStorage.getItem('fridge-repaired') || 0; localStorage.setItem('fridge-repaired', String(Date.now())); } catch (e) { /* no storage: ask */ }
+        if (Date.now() - last > 60000) { window.fridgeRepair(); return; }
+        var box = document.createElement('div');
+        box.id = 'repair';
+        box.className = 'repair';
+        box.innerHTML = '<p>' + (el
+          ? 'Το Fridge δεν μπόρεσε να ξεκινήσει. Μπορεί να συμβεί μετά από μια ενημέρωση. Τα τρόφιμα και οι ρυθμίσεις σας δεν χάνονται.'
+          : 'Fridge couldn’t start. This can happen after an update. Your food and settings are safe.') +
+          '</p><button class="btn primary big" type="button" onclick="fridgeRepair()">' + (el ? 'Επιδιόρθωση και φόρτωση ξανά' : 'Repair and reload') + '</button>';
+        document.body.appendChild(box);
+      };
+      window.addEventListener('error', function () { if (!started) setTimeout(window.fridgeOfferRepair, 1500); });
+      setTimeout(window.fridgeOfferRepair, 10000);
+    })();
+  </script>
+  <script type="module" src="js/app.js" onerror="fridgeOfferRepair()"></script>
 </body>
 </html>

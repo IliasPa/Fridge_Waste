@@ -174,3 +174,51 @@ export const OFF_CATEGORY_RULES = [
   ['snacks',     ['en:snacks', 'en:biscuits', 'en:chocolates', 'en:confectioneries', 'en:crisps']],
   ['desserts',   ['en:desserts', 'en:cakes']],
 ];
+
+/* Receipts: word stems that hint at a category for a receipt line the app
+   doesn't know yet. Each stem matches words that START with it (accents and
+   case don't matter); start it with '=' to match the whole word only.
+   Words are checked in the order they appear on the line, and the first
+   category that matches wins — so keep specific categories above general
+   ones (vegetables above dry, so "φασολάκια" isn't read as dried beans). */
+export const RECEIPT_HINTS = [
+  ['snacks',     ['σοκολατ', 'μπισκοτ', 'πατατακ', 'γκοφρετ', 'καραμελ', 'κρακερ', 'chips', 'crisps', 'schoko', 'keks', 'biscuit', 'cookie', 'chocolat', 'cracker', 'gummi']],
+  ['frozen',     ['κατεψ', 'παγωτ', 'frozen', 'tiefk', 'surgel', 'congel']],
+  ['milk',       ['γαλα', 'milch', 'vollmilch', 'milk', 'lait', 'latte', 'leche', 'mleko']],
+  ['yogurt',     ['γιαουρτ', 'κρεμα', 'joghurt', 'jogurt', 'yogurt', 'yoghurt', 'yaourt', 'skyr', 'quark', 'sahne', 'cream', 'creme']],
+  ['softcheese', ['φετα', 'μυζηθρ', 'ανθοτυρ', 'μοτσαρελ', 'ρικοτ', 'cottage', 'mozzarella', 'ricotta', 'feta', 'frischk', 'mascarpone']],
+  ['cheese',     ['τυρι', 'γραβιερ', 'κασερ', 'κεφαλοτυρ', 'γκουντα', 'εμμενταλ', 'παρμεζαν', 'χαλουμ', 'kase', 'cheese', 'gouda', 'emmentaler', 'parmesan', 'cheddar', 'fromage', 'formaggio', 'queso']],
+  ['butter',     ['βουτυρ', 'μαργαριν', 'butter', 'beurre', 'burro', 'margarin']],
+  ['eggs',       ['αυγα', 'αυγο', 'eier', 'eggs', 'oeufs', 'uova', 'huevos']],
+  ['mince',      ['κιμα', 'hackfleisch', 'mince', 'minced']],
+  ['poultry',    ['κοτοπουλ', 'hahnchen', 'huhn', 'chicken', 'poulet', 'pollo']],
+  ['deli',       ['ζαμπον', 'γαλοπουλ', 'σαλαμ', 'μορταδελ', 'μπεικον', 'προσουτ', 'παριζα', 'schinken', 'salami', 'wurst', 'bacon', '=ham']],
+  ['fish',       ['ψαρι', 'σολομ', 'γαριδ', 'καλαμαρ', 'χταποδ', 'μυδι', 'lachs', 'fisch', 'fish', 'salmon', 'shrimp', 'garnel']],
+  ['meat',       ['μοσχαρ', 'χοιριν', 'αρνι', 'κρεασ', 'μπριζολ', 'σουβλακ', 'λουκανικ', 'rind', 'schwein', 'fleisch', 'steak', 'beef', 'pork', 'lamb', 'sausage']],
+  ['vegetables', ['ντοματ', 'αγγουρ', 'πιπερι', 'κολοκυθ', 'μελιτζαν', 'καροτ', 'μπροκολ', 'λαχαν', 'φασολακ', 'μανιταρ', 'tomat', 'gurke', 'paprika', 'karotte', 'mohre', 'zucchin', 'brokkoli', 'pilze', 'champignon']],
+  ['leafy',      ['μαρουλ', 'σπανακ', 'ρουκα', 'χορτα', 'lettuce', 'salat', 'spinat', 'rucola']],
+  ['roots',      ['πατατ', 'κρεμμυδ', 'σκορδ', 'kartoffel', 'zwiebel', 'knoblauch', 'potato', 'onion', 'garlic']],
+  ['berries',    ['φραουλ', 'κερασ', 'ροδακιν', 'βερικοκ', 'μυρτιλ', 'erdbeer', 'kirsch', 'beere', 'berries', 'strawberr']],
+  ['fruit',      ['μηλα', 'πορτοκαλ', 'μπαναν', 'λεμον', 'αχλαδ', 'σταφυλ', 'ακτινιδ', 'καρπουζ', 'πεπον', 'apfel', 'banan', 'orange', 'zitrone', 'birne', 'traube', 'apple', 'lemon', 'fruit', 'obst']],
+  ['herbs',      ['μαιντανο', 'ανηθ', 'δυοσμ', 'βασιλικ', 'petersilie', 'basilikum', 'parsley', '=dill']],
+  ['bread',      ['ψωμ', 'αρτοσ', 'φρατζολ', 'τοστ', 'κρουασαν', 'κουλουρ', 'brot', 'toast', 'croissant', 'bread', 'baguette']],
+  ['dough',      ['φυλλο', 'ζυμη', 'blatterteig', 'teig', 'dough']],
+  ['dips',       ['τζατζικ', 'ταραμ', 'χουμουσ', 'hummus', 'aufstrich']],
+  ['sauces',     ['σαλτσ', 'κετσαπ', 'μουσταρδ', 'μαγιονεζ', 'ελιεσ', 'μελι', 'μαρμελαδ', 'ελαιολαδ', 'λαδι', 'ξυδι', 'ketchup', 'senf', 'mayo', 'honig', 'marmelade', 'olive', 'sauce']],
+  ['drinks',     ['χυμοσ', 'νερο', 'αναψυκτ', 'μπυρ', 'κρασι', 'cola', 'saft', 'wasser', 'bier', 'wein', 'juice', 'water', 'beer', 'wine', 'limonade']],
+  ['canned',     ['κονσερβ', 'τονοσ', 'καλαμποκ', 'thunfisch', 'canned', 'tuna']],
+  ['dry',        ['μακαρον', 'ζυμαρ', 'σπαγγετ', 'πεννε', 'κριθαρακ', 'ρυζι', 'φακεσ', 'φασολ', 'ρεβιθ', 'αλευρ', 'ζαχαρ', 'δημητριακ', 'βρωμ', 'nudeln', 'spaghetti', 'reis', 'mehl', 'zucker', 'linsen', 'pasta', 'rice', 'flour', 'sugar', 'cereal', 'hafer']],
+  ['desserts',   ['κεικ', 'τουρτ', 'κουλουρακ', 'kuchen', 'torte', 'dessert', 'pudding']],
+];
+
+/* Receipts: lines that aren't food — bags, bottle deposits, household
+   goods. They're left unticked when a receipt is read (you can still tick
+   them). Same stem rules as RECEIPT_HINTS. */
+export const NOT_FOOD_WORDS = [
+  'σακουλ', 'σακκουλ', 'τσαντ', 'εγγυοδοσ', 'εγγυησ', 'περιβαλλοντικ', 'ανακυκλ',
+  'απορρυπ', 'μαλακτικ', 'χλωριν', 'καθαριστ', 'χαρτι', 'χαρτομαντ', 'χαρτοπετσ', 'σαμπουαν', 'αφρολουτρ',
+  'σαπουν', 'οδοντο', 'αποσμητ', 'ξυραφ', 'σερβιετ', '=πανεσ', 'μωρομαντ', 'σφουγγ', 'αλουμινοχαρτ', 'μεμβραν', 'μπαταρ',
+  'pfand', 'leergut', 'tasche', 'tragetasche', '=tute', 'waschmittel', 'spulmittel', 'weichspul', 'toilettenpap',
+  'klopapier', 'kuchenroll', 'taschentuch', 'shampoo', 'duschgel', 'zahnpast', 'zahnburst', 'seife', 'deodor', 'windel', 'batteri',
+  'deposit', '=bag', '=bags', 'detergent', 'toilet', 'tissue', 'bleach', 'sponge', 'diaper', 'nappies', 'consigne', '=sac', 'statiegeld',
+];

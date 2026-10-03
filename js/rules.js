@@ -15,14 +15,15 @@ export function homeLocation(category, pickId) {
   return (p && p.loc) || cat(category).home || 'fridge';
 }
 
-/* Default expiry for a new item. A quick pick's own `days` applies only in
-   its usual location; elsewhere the category table decides. */
-export function defaultExpiry(category, location, pickId) {
+/* Default expiry for a new item bought on `from` (default today). A quick
+   pick's own `days` applies only in its usual location; elsewhere the
+   category table decides. */
+export function defaultExpiry(category, location, pickId, from = todayStr()) {
   const p = pickId && pickById(pickId);
   let days;
   if (p && p.days != null && location === homeLocation(category, pickId)) days = p.days;
   else days = cat(category)[location] ?? CATEGORIES.other[location] ?? 7;
-  return addDays(todayStr(), days);
+  return addDays(from, days);
 }
 
 /* New expiry after tapping "Opened": at most `opened` days from today.

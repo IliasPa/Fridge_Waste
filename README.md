@@ -12,13 +12,14 @@ Fridge is a free web app that keeps track of the food in your **fridge, freezer 
 
 | | |
 |---|---|
+| **Add a whole shop at once** | Take a photo of your supermarket receipt, or choose screenshots or a PDF of a digital one (e.g. from the Lidl Plus app). Fridge reads it on the phone and lists the food, with prices. Lines it doesn't know yet, you identify once by scanning the product's barcode or typing a name, and from then on that line is recognised by itself. |
 | **Add food fast** | Scan a barcode (product details come free from Open Food Facts), tap one of about 70 quick picks (Greek staples like feta, graviera, horta, tzatziki and gemista are included), or type a name. Products you name yourself are remembered for the next time you scan them. |
 | **Smart dates** | Each item gets a default use-by date based on its category and where you store it. Quick buttons: +2 days, +5 days, +1 week, +2 weeks, +1 month. Optionally, the app can read the printed date from a photo (on-device OCR), and you always confirm the result. |
 | **Opened / Move** | Tapping *Opened* shortens the remaining life (for example, milk gets about 4 days). Moving an item to the freezer extends its date, and taking it out of the freezer gives it a short "thawed" life. |
 | **Use first** | Expired items show in red, items expiring within 2 days in orange, and items expiring within 5 days in yellow. A badge counts the urgent ones. |
 | **One-tap actions** | Ate it · Threw out · Opened · Move, with Undo. Tapped "Opened" by mistake? Tap it again to restore the original date. |
 | **Shopping list** | Anything you ate or threw out can go back on the list with one tap. You can share the list. |
-| **Stats** | Items eaten vs. thrown out each month, your waste rate, and the money wasted if you entered prices. |
+| **Money** | A tab with what you spent on food each month, how much of it you ate or threw out, your waste rate, a 6-month chart, your biggest losses and your receipts. Prices come from receipts, or from the price you type. |
 | **What can I cook?** | 25 simple (mostly Greek) recipe ideas, ranked by what expires soonest. |
 | **Notifications** | Optional notification the day before food expires (see below for how this works on iPhone). |
 | **Calendar reminders** | Download a calendar file (.ics) with one event per item and an alert 1 and/or 2 days before, at a time you choose. |
@@ -34,6 +35,14 @@ Fridge is a free web app that keeps track of the food in your **fridge, freezer 
 The first time you scan, allow camera access. If you said no by mistake, turn it back on in **Settings → Apps → Safari → Camera**.
 
 If the live camera doesn't work, tap **Take a photo of the barcode** on the scan screen. It uses the iPhone's own camera and needs no permission. This happens with Lockdown Mode, if you opened the link inside Viber, Messenger or Instagram, or if camera access was denied. You can also type the barcode number.
+
+**Reading a receipt:** tap **Add → Receipt** (or set **More → Settings → The + button opens → Receipt** to go straight there).
+
+- Lay the receipt flat in good light, with its whole width in the photo. For a long receipt, take 2–3 overlapping photos from top to bottom and choose them together.
+- **Digital receipts** (Lidl Plus or another supermarket app): open the receipt in the app and take screenshots, or save it as a PDF if the app offers that, then use **Choose photos, screenshots or a PDF**.
+- Check the list: Fridge shows whether the lines it found add up to the receipt's total. Tap a line to change it, untick what you don't want, then tap **Add**.
+- Lines under **Needs a name**: tap **Scan barcodes** and scan each product's barcode once (or type a name, or mark it as not food). Next time, those lines are recognised by themselves. A line marked as "guess" was matched to a quick pick by its name; tap it if the guess is wrong.
+- Set the receipt's language on the receipt screen if your receipts aren't in Greek.
 
 **Notifications on iPhone:**
 
@@ -98,7 +107,7 @@ Then open http://localhost:8000 in Safari or Chrome. Opening `index.html` direct
 
 | File | What to change |
 |---|---|
-| `js/defaults.js` | **Shelf-life table** (days in fridge, freezer and pantry, after opening, after thawing), the quick-pick buttons, and the barcode category mapping. |
+| `js/defaults.js` | **Shelf-life table** (days in fridge, freezer and pantry, after opening, after thawing), the quick-pick buttons, the barcode category mapping, and the receipt words that hint at a category or mark a line as not food. |
 | `js/recipes.js` | The built-in recipe ideas. |
 | `js/i18n.js` | All English and Greek interface text. |
 | `tools/make-icons.mjs` | Regenerates the icons and splash screens (`node tools/make-icons.mjs`). |
@@ -117,19 +126,21 @@ js/recipes.js           built-in recipes
 js/i18n.js              English and Greek text
 js/db.js                storage (IndexedDB, with localStorage fallback)
 js/scanner.js           barcode camera and Open Food Facts lookup
-js/ocr.js               expiry-date reading (Tesseract.js)
+js/ocr.js               reads text from photos and PDFs: expiry dates and receipts (Tesseract.js, pdf.js)
+js/receipt.js           turns receipt text into food lines; remembers lines you identified
 js/ics.js               calendar file builder
 js/notify.js            notifications (permission, showing, Android background check)
 js/utils.js, icons.js   helpers and SVG icons
 lib/html5-qrcode.min.js barcode library (bundled, works offline)
-icons/                  app icons and iPhone splash screens
+icons/                  app icon (icon.png) and favicon (favicon.svg)
 ```
 
 ## Notes and limits
 
 - **Barcode lookup** needs internet. Offline, the app asks for the name once and remembers it.
 - **Date-from-photo** downloads the Tesseract.js text reader (about 5 MB) from a free CDN the first time you use it. After that it's cached and works offline. It reads numeric dates best (e.g. `30/09/2026`, `09.2026`), and you always confirm the date before it's used.
-- **iPhones with Lockdown Mode** block IndexedDB, WebAssembly and the live camera. Fridge switches to basic storage, and barcodes can still be scanned with **Take a photo of the barcode**, but "Read date from photo" isn't available. To get everything, turn off Lockdown Mode for this site in Safari's website settings.
+- **Receipts** use the same text reader, plus about 1.3 MB for Greek (or another receipt language) the first time. PDF receipts are opened with pdf.js, also downloaded once. Everything is read on the phone; nothing is uploaded. A blurry or crumpled photo gives misread lines: the total check tells you when something is missing.
+- **iPhones with Lockdown Mode** block IndexedDB, WebAssembly and the live camera. Fridge switches to basic storage, and barcodes can still be scanned with **Take a photo of the barcode**, but "Read date from photo" and reading receipt photos aren't available (PDF receipts still work). To get everything, turn off Lockdown Mode for this site in Safari's website settings.
 - **No push notifications**, because those would need a server. Notifications appear when the app runs, plus in the background on Android. For alerts at a fixed time on iPhone, use the calendar file. The in-app badge and the red/orange/yellow colours show what's urgent.
 - The shelf-life defaults are rough household guides, not food-safety advice. Always check the label.
 
@@ -138,3 +149,4 @@ icons/                  app icons and iPhone splash screens
 - Product data: [Open Food Facts](https://world.openfoodfacts.org), open database (ODbL).
 - Barcode scanning: [html5-qrcode](https://github.com/mebjas/html5-qrcode) (Apache-2.0), based on ZXing.
 - OCR: [Tesseract.js](https://github.com/naptha/tesseract.js) (Apache-2.0).
+- PDF receipts: [pdf.js](https://github.com/mozilla/pdf.js) (Apache-2.0).

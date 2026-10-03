@@ -3,8 +3,9 @@
    - App files are pre-cached on install and served from the cache
      instantly; a fresh copy is fetched in the background, so edits you
      publish show up on the next launch.
-   - The text-reader library (Tesseract, from cdn.jsdelivr.net) and product
-     photos are cached the first time they're used.
+   - The text-reader library and its language data (Tesseract), the PDF
+     reader (pdf.js), both from cdn.jsdelivr.net, and product photos are
+     cached the first time they're used.
    - Open Food Facts lookups always go to the network (nothing to cache).
    - Notifications: opens the app when one is tapped, and on Android
      (installed app) checks about once a day in the background for food
@@ -12,7 +13,7 @@
 
    If you add or rename app files, add them to APP_FILES and bump VERSION. */
 
-const VERSION = 'v0.2';
+const VERSION = 'v0.3';
 const APP_CACHE = `fridge-app-${VERSION}`;
 const RUNTIME_CACHE = 'fridge-runtime';
 
@@ -29,19 +30,20 @@ const APP_FILES = [
   'js/notify.js',
   'js/ics.js',
   'js/ocr.js',
+  'js/receipt.js',
   'js/recipes.js',
   'js/rules.js',
   'js/scanner.js',
   'js/utils.js',
   'lib/html5-qrcode.min.js',
   'icons/favicon.svg',
-  'icons/icon-192.png',
-  'icons/icon-512.png',
-  'icons/apple-touch-icon.png',
+  'icons/icon.png',
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(APP_CACHE).then((cache) => cache.addAll(APP_FILES)));
+  // Fresh copies from the server, not the browser's HTTP cache (GitHub Pages
+  // lets it keep files for 10 minutes), so the offline copy is one version.
+  event.waitUntil(caches.open(APP_CACHE).then((cache) => cache.addAll(APP_FILES.map((f) => new Request(f, { cache: 'reload' })))));
   self.skipWaiting();
 });
 
@@ -57,7 +59,8 @@ self.addEventListener('activate', (event) => {
 async function staleWhileRevalidate(request, cacheName, event) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request, { ignoreSearch: request.mode === 'navigate' });
-  const network = fetch(request).then((res) => {
+  // Ask the server whether the file changed instead of trusting the HTTP cache.
+  const network = fetch(request.url, { cache: 'no-cache' }).then((res) => {
     if (res && (res.ok || res.type === 'opaque')) cache.put(request, res.clone());
     return res;
   }).catch(() => null);
@@ -159,7 +162,7 @@ async function checkExpiring() {
       line(text.today, due.filter((i) => i.expiresAt === today)),
       line(text.tomorrow, due.filter((i) => i.expiresAt === tomorrow)),
     ].filter(Boolean).join('\n');
-    const icon = new URL('icons/icon-192.png', self.registration.scope).href;
+    const icon = new URL('icons/icon.png', self.registration.scope).href;
     await self.registration.showNotification(text.title, { body, tag: 'fridge-expiry', icon, badge: icon, data: { url: self.registration.scope } });
 
     const activeIds = new Set(items.map((i) => i.id));

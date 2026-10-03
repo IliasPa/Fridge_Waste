@@ -1,5 +1,8 @@
-/* Generates the app icons and iPhone splash screens as PNGs.
+/* Generates the app icon: icons/icon.png (512×512) and icons/favicon.svg.
    Not needed to run the app — only if you want to change the icon.
+   The PNG is square and full-bleed, so the same file works as the iPhone
+   Home Screen icon (iOS rounds the corners), the Android maskable icon (the
+   fridge stays inside the safe zone) and the notification icon.
    Usage (from the project folder):  node tools/make-icons.mjs
    Pure Node.js, no packages required. */
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -64,7 +67,7 @@ function fridge(x, y) {
 }
 
 /**
- * Renders a square icon or a splash screen.
+ * Renders a square icon.
  * @param opts.scale    how big the fridge is relative to the canvas (1 = full)
  * @param opts.rounded  corner radius for the background (0 = square, full bleed)
  */
@@ -102,12 +105,7 @@ function render(w, h, { scale = 1, rounded = 0, ss = 4 } = {}) {
 
 const save = (name, data) => { writeFileSync(new URL(name, OUT), data); console.log('wrote icons/' + name); };
 
-save('icon-192.png', render(192, 192, { rounded: 0.22 }));
-save('icon-512.png', render(512, 512, { rounded: 0.22 }));
-save('icon-maskable-512.png', render(512, 512, { scale: 0.8 }));   // full bleed, safe zone
-save('apple-touch-icon.png', render(180, 180));                     // iOS rounds corners itself
-save('splash-1290x2796.png', render(1290, 2796, { scale: 0.32, ss: 2 })); // iPhone 15 Pro Max / Plus
-save('splash-1179x2556.png', render(1179, 2556, { scale: 0.32, ss: 2 })); // iPhone 15 / 15 Pro
+save('icon.png', render(512, 512));
 
 writeFileSync(new URL('favicon.svg', OUT), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
 <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2e9d6a"/><stop offset="1" stop-color="#1a6a47"/></linearGradient></defs>
